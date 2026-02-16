@@ -9,6 +9,7 @@ BYTES_ON_SYMB	equ 2d
 SYMBS_IN_ROW	equ 80d
 BYTES_IN_ROW	equ BYTES_ON_SYMB*SYMBS_IN_ROW
 CNT_ROWS        equ 25d
+MAX_STRING_LEN  equ 76d
 
 NUMBER_ROW_F	equ 11d
 NUMBER_ROW_S    equ 13d
@@ -63,7 +64,9 @@ Main                    proc
                 mov bx, 0
                 mov si, 82h                     ; first symbol of command line
 
+                push bx
                 call Atoi_byte                  ; ax = color of string
+                pop bx
 
                 cmp al, -1d
                 je @@no_first_attribute
@@ -126,43 +129,14 @@ Main                    proc
                 dec cl                          ; skip first space
                 sub cl, bl                      ; skip symbols
 
-	        mov bx, ax
-                mov ax, cx
-                mov di, cx
-
-                shr cx, 1d                      ; cx >> 1
-                mov ax, 40d
-                sub ax, cx                      ; ax = 40 - cx
-                mov cx, BYTES_ON_SYMB           ; cx = 2
                 push dx
-                mul cx                          ; ax = ax * cx
-                pop dx
-                add ax, ROW_OFFSET_S
-
-                mov cx, di
-                mov di, ax
-                mov ax, bx
-
                 push cx
                 push ax
-                push di
                 push si
                 call Print_String
-                add sp, 8d                      ; 4 arguments
-
-
-                mov di, cx
-                shr cx, 1d                      ; cx >> 1
-                mov ax, 38d
-                sub ax, cx                      ; ax = 38 - cx
-                mov cx, BYTES_ON_SYMB           ; cx = 2
-                push dx
-                mul cx                          ; ax = ax * cx = ax * 2
+                add sp, 6d                      ; 3 arguments
                 pop dx
-                add ax, ROW_OFFSET_F
-                
-                mov cx, di
-                mov di, ax
+
                 jmp @@print_frame
                 
         
@@ -275,43 +249,95 @@ Read_hex_number         proc
 ;;;;            Function "Print_String" prints string to video-memory from commang line                      ;;;;
 ;                                                                                                               ;
 ;; Entry:       (SI) - the position of string from which string is printing                                    ;;
-;               (DI) - the position of segment video-memory from which we start printing into the video memory  ;
 ;               (AL) - color of string + back_groud                                                             ;
 ;               (CL) - len of printing string                                                                   ;
 ;                                                                                                               ;
-;; Exit:        CL - len of string from command_line                                                           ;;
+;; Exit:        BX - cnt rows                                                                                  ;;
 ;                                                                                                               ;
 ;; Expected:    ES = 0b800h (segment of video-memory)                                                          ;;
 ;               DS = CS                                                                                         ;
 ;                                                                                                               ;
 ;                                                                                                               ;
-;; Destroyed:   SI, DI, AX, BX                                                                                 ;;
+;; Destroyed:   SI, DI, AX, DX                                                                                 ;;
 ;_______________________________________________________________________________________________________________;
 
-Print_String            proc        pointer_on_string, pointer_on_vm, color, len_of_string
+Print_String            proc        pointer_on_string, color, len_of_string
 			
 		mov si, pointer_on_string
-		mov di, pointer_on_vm
-                mov ax, color
-		mov ah, al
                 mov cx, len_of_string
 
-                mov bl, cl
+                mov ax, cx
+                add ax, MAX_STRING_LEN  ; 80-2-2-1 (2 = space, 2 = frame)
+                xor dx, dx              
+                mov bx, MAX_STRING_LEN  
+                div bx                  ; ax = (cx + MAX_STRING_LEN - 1) / MAX_STRING_LEN - cnt rows
+                mov bx, ax
+
+                mov ax, color
+		mov ah, al
+
+                push cx
+                push bx
+
+                mov di, ROW_OFFSET_S + 2d*2d
+
+        @@print_loop_all:
+                cmp bx, 1
+                ja @@print_all_row
+
+                mov bx, ax
+                mov ax, cx
+
+                shr cx, 1d                      ; cx >> 1
+                mov ax, 40d
+                sub ax, cx                      ; ax = 40 - cx
+                mov cx, BYTES_ON_SYMB           ; cx = 2
+                push dx
+                mul cx                          ; ax = ax * cx
+                pop dx
+                add ax, di
+
+                mov di, ax
+                sub di, 2d*2d
+                mov ax, bx
 
         @@print_loop:
                 mov al, ds:[si]		; read symbol of string from PSP
                 cmp al, 0Dh		; al == EOS or no
-                je done			; if (al == EOS) goto done
+                je @@done       	; if (al == EOS) goto done
                 
                 mov es:[di], ax		; show symbol+attribute
                 
                 add di, 2		; di += 2
                 inc si			; si++
-                jmp @@print_loop	
+
+                jmp @@print_loop
+
+
+        @@print_all_row:
+                push cx
+                mov cx, MAX_STRING_LEN
+
+        @@print_row:
+                mov al, ds:[si]         ; read symbol of string from PSP
+                mov es:[di], ax		; show symbol+attribute
+                
+                add di, 2d		; di += 2
+                inc si	
+
+                loop @@print_row
+
+                pop cx
+                sub cx, MAX_STRING_LEN
+                dec bx
+                add di, 4d*2d
+                jmp @@print_loop_all
 
                         
-        done:
-                mov cl, bl
+        @@done:
+                pop bx
+                pop cx
+
 		ret
 
                         endp
@@ -364,9 +390,9 @@ Print_My_Message        proc
 ;                                          <STD call>                                                           ;
 ;;;;            Function "Print_Frame" prints a frame around the string to video-memory                      ;;;;
 ;                                                                                                               ;
-;; Entry:       DI - the position of segment video-memory from which we start printing into the video memory    ;     
-;               AH - color of frame + back_groud                                                                ;
+;; Entry:       AH - color of frame + back_groud                                                                ;
 ;               CX - len of string                                                                              ;
+;               BX - cnt rows                                                                                   ;
 ;                                                                                                               ;
 ;; Exit:                                                                                                       ;;
 ;                                                                                                               ;
@@ -377,6 +403,22 @@ Print_My_Message        proc
 ;_______________________________________________________________________________________________________________;
 
 Print_Frame             proc
+
+                cmp bx, 1
+                ja @@big_frame 
+
+
+                mov di, cx
+                shr cx, 1d                      ; cx >> 1
+                mov ax, 38d
+                sub ax, cx                      ; ax = 38 - cx
+                mov cx, BYTES_ON_SYMB           ; cx = 2
+                mul cx                          ; ax = ax * cx = ax * 2
+                add ax, ROW_OFFSET_F
+                
+                mov cx, di
+                mov di, ax
+
                 mov si, di
                 mov dx, cx
 
@@ -435,6 +477,95 @@ Print_Frame             proc
 		mov al, FRAME_R_D
 		mov es:[di], ax		        ; draw right-down corner
 
+                jmp @@done
+
+
+        @@big_frame:
+                call Print_Big_Frame
+
+
+        @@done:
+                ret
+
+        
+
+                        endp
+
+
+
+;_______________________________________________________________________________________________________________;
+;                                          <STD call>                                                           ;
+;;;;            Function "Print_Big_Frame" prints a big frame around the string to video-memory              ;;;;
+;                                                                                                               ;
+;; Entry:       AH - color of frame + back_groud                                                                ;
+;               BX - cnt rows                                                                                   ;
+;                                                                                                               ;
+;; Exit:                                                                                                       ;;
+;                                                                                                               ;
+;; Expected:    ES = 0b800h (segment of video-memory)                                                          ;;
+;               DS = CS                                                                                         ;
+;                                                                                                               ;
+;; Destroyed:   DI, AX, CX, DX, BX, SI                                                                         ;; 
+;_______________________________________________________________________________________________________________;
+
+Print_Big_Frame         proc
+
+                mov di, ROW_OFFSET_F
+                mov si, di
+
+                mov dx, bx
+
+
+		mov al, FRAME_L_T
+		mov es:[di], ax		        ; draw left-top corner
+		add di, 2d
+
+                mov cx, SYMBS_IN_ROW-2d       ; cx = 78d
+		mov al, FRAME_TOP
+
+	@@print_top:		
+		mov es:[di], ax		        ; draw top
+		add di, 2d
+		loop @@print_top
+		
+
+		mov bx, BYTES_IN_ROW
+		mov al, FRAME_R_T
+		mov es:[di], ax			; draw right-top corner
+		lea di, [bx + si]
+		add bx, BYTES_IN_ROW	
+
+
+		mov cx, dx
+                add cx, 2
+
+	@@print_columns:	                ; while (cx != 0)
+		mov al, FRAME_LEFT	
+		mov es:[di], ax		        ; draw left column
+		add di, BYTES_IN_ROW - 1d*2d    ; di += 79d
+		mov al, FRAME_RIGHT
+		mov es:[di], ax		        ; draw right column
+		lea di, [bx + si]
+		add bx, BYTES_IN_ROW
+		loop @@print_columns
+
+
+		mov al, FRAME_L_D
+		mov es:[di], ax		        ; draw left-down corner
+		add di, 2d
+		
+
+		mov cx, SYMBS_IN_ROW-2d        ; cx = 78d
+		mov al, FRAME_DOWN
+
+	@@print_down:		                ; while (cx != 0)
+		mov es:[di], ax                 ; draw down
+		add di, 2d
+		loop @@print_down
+
+
+		mov al, FRAME_R_D
+		mov es:[di], ax		        ; draw right-down corner
 
                 ret
 
