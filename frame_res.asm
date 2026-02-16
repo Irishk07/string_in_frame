@@ -25,15 +25,6 @@ BYTES_OFFSET_S	equ ROW_OFFSET_S+BYTES_ON_SYMB*NUMBER_COLUMN_S
 COLOR_S		equ 0F4h
 COLOR_F		equ 0Fh
 
-FRAME_LEFT	equ 0C6h
-FRAME_RIGHT	equ 0B5h
-FRAME_TOP	equ 0CDh
-FRAME_DOWN	equ 0CDh 
-FRAME_L_T	equ 0D5h
-FRAME_R_T	equ 0B8h
-FRAME_L_D	equ 0D4h
-FRAME_R_D	equ 0BEh 
-
 BACK_COLOR      equ 005h
 BACK_0          equ 0B0h
 BACK_1          equ 0B1h
@@ -74,6 +65,7 @@ Main                    proc
                 add si, 2d                      ; si = first symbol of string (skip '*_ '), '*' already skipped
                 mov bl, 3d                      ; cnt skip symbols ('__ ')
 
+
         @@read_second_attribute:
                 push ax
                 push bx
@@ -90,7 +82,35 @@ Main                    proc
                 add si, 2d                      ; si = first symbol of string (skip '*_ '), '*' already skipped
                 add bl, 3d                      ; cnt skip symbols ('__ ')
                                        
+
+        @@read_third_attribute:
+                push ax
+                mov al, ds:[si]
+
+                call Read_hex_number
+                mov cx, ax
+                pop ax 
+
+                cmp cl, -1d
+                je @@no_third_attribute
+
+                add si, 2d                      ; si = first symbol of string (skip '_ ')
+                add bl, 2d                      ; cnt skip symbols ('_ ')
+
+        @@check_frame_1:
+                cmp cl, 1
+                jne @@check_frame_2
+                push offset frame_1
+
+        @@check_frame_2:
+                cmp cl, 2
+                jne @@check_frame_3
+                push offset frame_2
+
+        @@check_frame_3:
+                push offset frame_3
                 jmp @@check_len_string
+
 
         @@no_first_attribute:
                 mov al, COLOR_S 
@@ -101,11 +121,18 @@ Main                    proc
         @@no_second_attribute:
                 mov dl, COLOR_F 
                 mov si, 82h
-                add si, bx                     ; cnt skip symbols
+                add si, bx                      ; cnt skip symbols
+                jmp @@check_len_string
+
+        @@no_third_attribute:
+                push offset frame_2
+                mov si, 82h
+                add si, bx                      ; cnt skip symbols
                 jmp @@check_len_string
 
         
         @@check_len_string:
+                xor cx, cx
                 mov cl, ds:[80h]	        ; len of command line (from PSP)
 	        cmp cl, 0d		        ; cl == 0 or no
 	        jne @@with_args		        ; if (cl != 0) goto with_args 	
@@ -141,6 +168,7 @@ Main                    proc
                 
         
         @@print_frame:
+                pop si
                 mov ah, dl
                 call Print_Frame
 
@@ -267,7 +295,8 @@ Print_String            proc        pointer_on_string, color, len_of_string
                 mov cx, len_of_string
 
                 mov ax, cx
-                add ax, MAX_STRING_LEN  ; 80-2-2-1 (2 = space, 2 = frame)
+                mov ah, 0
+                add ax, MAX_STRING_LEN  ; 80-2-2 (2 = space, 2 = frame)
                 xor dx, dx              
                 mov bx, MAX_STRING_LEN  
                 div bx                  ; ax = (cx + MAX_STRING_LEN - 1) / MAX_STRING_LEN - cnt rows
@@ -393,21 +422,26 @@ Print_My_Message        proc
 ;; Entry:       AH - color of frame + back_groud                                                                ;
 ;               CX - len of string                                                                              ;
 ;               BX - cnt rows                                                                                   ;
+;               SI - position from which start symbols for frame                                                ;
 ;                                                                                                               ;
 ;; Exit:                                                                                                       ;;
 ;                                                                                                               ;
 ;; Expected:    ES = 0b800h (segment of video-memory)                                                          ;;
 ;               DS = CS                                                                                         ;
 ;                                                                                                               ;
-;; Destroyed:   DI, AX, CX, DX, BX, SI                                                                         ;; 
+;; Destroyed:   DI, AX, CX, DX, BX                                                                             ;; 
 ;_______________________________________________________________________________________________________________;
 
 Print_Frame             proc
 
-                cmp bx, 1
-                ja @@big_frame 
+                cmp bx, 1d
+                jna @@small_frame
+                jmp near ptr @@big_frame 
+                ret
 
 
+        @@small_frame:
+                push ax
                 mov di, cx
                 shr cx, 1d                      ; cx >> 1
                 mov ax, 38d
@@ -418,18 +452,19 @@ Print_Frame             proc
                 
                 mov cx, di
                 mov di, ax
+                pop ax
 
-                mov si, di
+
                 mov dx, cx
+                push di
 
-
-		mov al, FRAME_L_T
+		mov al, [si]                    ; left-top corner
 		mov es:[di], ax		        ; draw left-top corner
 		add di, 2d
 		
 
 		add cx, 2d
-		mov al, FRAME_TOP
+		mov al, [si + 1d]               ; top
 
 	@@print_top:		
 		mov es:[di], ax		        ; draw top
@@ -437,36 +472,38 @@ Print_Frame             proc
 		loop @@print_top
 		
 
-		mov bx, BYTES_IN_ROW
-		mov al, FRAME_R_T
+                pop bx
+                add bx, BYTES_IN_ROW
+		mov al, [si + 2d]               ; right-top corner
 		mov es:[di], ax			; draw right-top corner
-		lea di, [bx + si]
+
+		mov di, bx
 		add bx, BYTES_IN_ROW	
 
 
 		mov cx, 3d
 
 	@@print_columns:	                ; while (cx != 0)
-		mov al, FRAME_LEFT	
+		mov al, [si + 3d]               ; left column	
 		mov es:[di], ax		        ; draw left column
 		add di, dx	
 		add di, dx
 		add di, 3d*2d		        ; skip message + 2 spaces + left symb
-		mov al, FRAME_RIGHT
+		mov al, [si + 4d]               ; right column
 		mov es:[di], ax		        ; draw right column
-		lea di, [bx + si]
+		mov di, bx
 		add bx, BYTES_IN_ROW
 		loop @@print_columns
 
 
-		mov al, FRAME_L_D
+		mov al, [si + 5d]               ; left-down corner
 		mov es:[di], ax		        ; draw left-down corner
 		add di, 2d
 		
 
 		mov cx, dx
 		add cx, 2d		        ; cx = len of ' message '
-		mov al, FRAME_DOWN
+		mov al, [si + 6d]               ; down
 
 	@@print_down:		                ; while (cx != 0)
 		mov es:[di], ax                 ; draw down
@@ -474,7 +511,7 @@ Print_Frame             proc
 		loop @@print_down
 
 
-		mov al, FRAME_R_D
+		mov al, [si + 7d]               ; right-down corner
 		mov es:[di], ax		        ; draw right-down corner
 
                 jmp @@done
@@ -487,8 +524,6 @@ Print_Frame             proc
         @@done:
                 ret
 
-        
-
                         endp
 
 
@@ -499,29 +534,31 @@ Print_Frame             proc
 ;                                                                                                               ;
 ;; Entry:       AH - color of frame + back_groud                                                                ;
 ;               BX - cnt rows                                                                                   ;
+;               SI - position from which start symbols for frame                                                ;
 ;                                                                                                               ;
 ;; Exit:                                                                                                       ;;
 ;                                                                                                               ;
 ;; Expected:    ES = 0b800h (segment of video-memory)                                                          ;;
 ;               DS = CS                                                                                         ;
 ;                                                                                                               ;
-;; Destroyed:   DI, AX, CX, DX, BX, SI                                                                         ;; 
+;; Destroyed:   DI, AX, CX, DX, BX                                                                             ;; 
 ;_______________________________________________________________________________________________________________;
 
 Print_Big_Frame         proc
 
                 mov di, ROW_OFFSET_F
-                mov si, di
 
                 mov dx, bx
+                push di
 
 
-		mov al, FRAME_L_T
+		mov al, [si]                    ; left-top corner
 		mov es:[di], ax		        ; draw left-top corner
 		add di, 2d
 
-                mov cx, SYMBS_IN_ROW-2d       ; cx = 78d
-		mov al, FRAME_TOP
+
+                mov cx, SYMBS_IN_ROW-2d         ; cx = 78d
+		mov al, [si + 1d]               ; top 
 
 	@@print_top:		
 		mov es:[di], ax		        ; draw top
@@ -529,10 +566,11 @@ Print_Big_Frame         proc
 		loop @@print_top
 		
 
-		mov bx, BYTES_IN_ROW
-		mov al, FRAME_R_T
+                pop bx
+		add bx, BYTES_IN_ROW
+		mov al, [si + 2d]               ; right-top corner
 		mov es:[di], ax			; draw right-top corner
-		lea di, [bx + si]
+		mov di, bx
 		add bx, BYTES_IN_ROW	
 
 
@@ -540,23 +578,23 @@ Print_Big_Frame         proc
                 add cx, 2
 
 	@@print_columns:	                ; while (cx != 0)
-		mov al, FRAME_LEFT	
+		mov al, [si + 3d]               ; left column	
 		mov es:[di], ax		        ; draw left column
 		add di, BYTES_IN_ROW - 1d*2d    ; di += 79d
-		mov al, FRAME_RIGHT
+		mov al, [si + 4d]               ; right column
 		mov es:[di], ax		        ; draw right column
-		lea di, [bx + si]
+		mov di, bx
 		add bx, BYTES_IN_ROW
 		loop @@print_columns
 
 
-		mov al, FRAME_L_D
+		mov al, [si + 5d]               ; left-down corner
 		mov es:[di], ax		        ; draw left-down corner
 		add di, 2d
 		
 
-		mov cx, SYMBS_IN_ROW-2d        ; cx = 78d
-		mov al, FRAME_DOWN
+		mov cx, SYMBS_IN_ROW-2d         ; cx = 78d
+		mov al, [si + 6d]               ; down
 
 	@@print_down:		                ; while (cx != 0)
 		mov es:[di], ax                 ; draw down
@@ -564,8 +602,9 @@ Print_Big_Frame         proc
 		loop @@print_down
 
 
-		mov al, FRAME_R_D
+		mov al, [si + 7d]               ; right-down corner
 		mov es:[di], ax		        ; draw right-down corner
+
 
                 ret
 
@@ -636,6 +675,10 @@ Paint_Back              proc
 
 my_message	db 'You are beautiful, but where is the message?'
 LEN_MY_MESSAGE	equ $ - my_message
+
+frame_1         db 0D5h, 0CDh, 0B8h, 0C6h, 0B5h, 0D4h, 0CDh, 0BEh
+frame_2         db 0DAh, 0C4h, 0BFh, 0B3h, 0B3h, 0C0h, 0C4h, 0D9h
+frame_3         db 003h, 003h, 003h, 004h, 004h, 003h, 003h, 003h
 
 
 end 		Start
