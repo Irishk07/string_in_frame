@@ -58,19 +58,47 @@ Main                    proc
                 mov di, 0d
                 call Paint_Back
 
-
+        
+        @@read_first_attribute:
+                mov bx, 0
                 mov si, 82h                     ; first symbol of command line
-                call Atoi_byte
+
+                call Atoi_byte                  ; ax = color of string
+
                 cmp al, -1d
-                je @@no_attributes
-                add si, 2d                      ; si = first symbol of string (skip '__ ')
-                mov bl, 3d                      ; cnt skip symbols
+                je @@no_first_attribute
+
+                add si, 2d                      ; si = first symbol of string (skip '*_ '), '*' already skipped
+                mov bl, 3d                      ; cnt skip symbols ('__ ')
+
+        @@read_second_attribute:
+                push ax
+                push bx
+
+                call Atoi_byte
+
+                pop bx
+                mov dx, ax                      ; dx = color of frame
+                pop ax
+
+                cmp dl, -1d
+                je @@no_second_attribute
+                
+                add si, 2d                      ; si = first symbol of string (skip '*_ '), '*' already skipped
+                add bl, 3d                      ; cnt skip symbols ('__ ')
+                                       
                 jmp @@check_len_string
 
-        @@no_attributes:
+        @@no_first_attribute:
                 mov al, COLOR_S 
+                mov dl, COLOR_F
                 mov si, 82h
-                mov bl, 0                       ; cnt skip symbols
+                jmp @@check_len_string
+
+        @@no_second_attribute:
+                mov dl, COLOR_F 
+                mov si, 82h
+                add si, bx                     ; cnt skip symbols
                 jmp @@check_len_string
 
         
@@ -91,7 +119,7 @@ Main                    proc
                 call Print_My_Message
 
                 mov di, BYTES_OFFSET_F
-                jmp @@print_frame_loop
+                jmp @@print_frame
     
 
         @@with_args:
@@ -106,18 +134,21 @@ Main                    proc
                 mov ax, 40d
                 sub ax, cx                      ; ax = 40 - cx
                 mov cx, BYTES_ON_SYMB           ; cx = 2
+                push dx
                 mul cx                          ; ax = ax * cx
+                pop dx
                 add ax, ROW_OFFSET_S
 
                 mov cx, di
                 mov di, ax
                 mov ax, bx
 
+                push cx
                 push ax
                 push di
                 push si
                 call Print_String
-                add sp, 6d
+                add sp, 8d                      ; 4 arguments
 
 
                 mov di, cx
@@ -125,18 +156,19 @@ Main                    proc
                 mov ax, 38d
                 sub ax, cx                      ; ax = 38 - cx
                 mov cx, BYTES_ON_SYMB           ; cx = 2
+                push dx
                 mul cx                          ; ax = ax * cx = ax * 2
+                pop dx
                 add ax, ROW_OFFSET_F
                 
                 mov cx, di
                 mov di, ax
-                jmp @@print_frame_loop
+                jmp @@print_frame
                 
-                
-        @@print_frame_loop:
-		mov ah, COLOR_F
+        
+        @@print_frame:
+                mov ah, dl
                 call Print_Frame
-
 
 	        ret
 
@@ -155,7 +187,7 @@ Main                    proc
 ;                                                                                                               ;
 ;; Expected:    DS = CS                                                                                         ;
 ;                                                                                                               ;
-;; Destroyed:   BX, SI                                                                                             ;;
+;; Destroyed:   BX, SI                                                                                         ;;
 ;_______________________________________________________________________________________________________________;
 
 Atoi_byte               proc
@@ -245,6 +277,7 @@ Read_hex_number         proc
 ;; Entry:       (SI) - the position of string from which string is printing                                    ;;
 ;               (DI) - the position of segment video-memory from which we start printing into the video memory  ;
 ;               (AL) - color of string + back_groud                                                             ;
+;               (CL) - len of printing string                                                                   ;
 ;                                                                                                               ;
 ;; Exit:        CL - len of string from command_line                                                           ;;
 ;                                                                                                               ;
@@ -255,14 +288,15 @@ Read_hex_number         proc
 ;; Destroyed:   SI, DI, AX, BX                                                                                 ;;
 ;_______________________________________________________________________________________________________________;
 
-Print_String            proc        pointer_on_string, pointer_on_vm, color
-
-                mov bl, cl
+Print_String            proc        pointer_on_string, pointer_on_vm, color, len_of_string
 			
 		mov si, pointer_on_string
 		mov di, pointer_on_vm
                 mov ax, color
 		mov ah, al
+                mov cx, len_of_string
+
+                mov bl, cl
 
         @@print_loop:
                 mov al, ds:[si]		; read symbol of string from PSP
