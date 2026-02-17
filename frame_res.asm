@@ -23,7 +23,7 @@ BYTES_OFFSET_F	equ ROW_OFFSET_F+BYTES_ON_SYMB*NUMBER_COLUMN_F
 BYTES_OFFSET_S	equ ROW_OFFSET_S+BYTES_ON_SYMB*NUMBER_COLUMN_S
 
 COLOR_S		equ 0F4h
-COLOR_F		equ 0Fh
+COLOR_F		equ 0Ch
 
 BACK_COLOR      equ 005h
 BACK_0          equ 0B0h
@@ -50,86 +50,42 @@ Main                    proc
                 mov di, 0d
                 call Paint_Back
 
-        
-        @@read_first_attribute:
-                mov bx, 0
-                mov si, 82h                     ; first symbol of command line
 
-                push bx
-                call Atoi_byte                  ; ax = color of string
-                pop bx
-
+                mov si, 82h                     ; first symbol in command line
+                call Read_attributes
                 cmp al, -1d
                 je @@no_first_attribute
-
-                add si, 2d                      ; si = first symbol of string (skip '*_ '), '*' already skipped
-                mov bl, 3d                      ; cnt skip symbols ('__ ')
-
-
-        @@read_second_attribute:
-                push ax
-                push bx
-
-                call Atoi_byte
-
-                pop bx
-                mov dx, ax                      ; dx = color of frame
-                pop ax
-
                 cmp dl, -1d
                 je @@no_second_attribute
-                
-                add si, 2d                      ; si = first symbol of string (skip '*_ '), '*' already skipped
-                add bl, 3d                      ; cnt skip symbols ('__ ')
-                                       
-
-        @@read_third_attribute:
-                push ax
-                mov al, ds:[si]
-
-                call Read_hex_number
-                mov cx, ax
-                pop ax 
-
                 cmp cl, -1d
                 je @@no_third_attribute
 
-                add si, 2d                      ; si = first symbol of string (skip '_ ')
-                add bl, 2d                      ; cnt skip symbols ('_ ')
-
-        @@check_frame_1:
-                cmp cl, 1
-                jne @@check_frame_2
-                push offset frame_1
-
-        @@check_frame_2:
-                cmp cl, 2
-                jne @@check_frame_3
-                push offset frame_2
-
-        @@check_frame_3:
-                push offset frame_3
+                xor di, di
+                mov di, cx                      ; save number of frame
+                call Check_frame
+                push cx
                 jmp @@check_len_string
-
 
         @@no_first_attribute:
                 mov al, COLOR_S 
                 mov dl, COLOR_F
+                push offset frame_3
                 mov si, 82h
                 jmp @@check_len_string
 
         @@no_second_attribute:
                 mov dl, COLOR_F 
+                push offset frame_3
                 mov si, 82h
                 add si, bx                      ; cnt skip symbols
                 jmp @@check_len_string
 
         @@no_third_attribute:
-                push offset frame_2
+                push offset frame_3
                 mov si, 82h
                 add si, bx                      ; cnt skip symbols
                 jmp @@check_len_string
-
+        
         
         @@check_len_string:
                 xor cx, cx
@@ -155,7 +111,15 @@ Main                    proc
         @@with_args:
                 dec cl                          ; skip first space
                 sub cl, bl                      ; skip symbols
+                cmp di, 0
+                je @@users_frame
+                jmp @@call_print_string
 
+        @@users_frame:
+                sub cl, 8d + 1d                 ; 8 symbols for frame + space
+                add si, 8d + 1d
+
+        @@call_print_string:
                 push dx
                 push cx
                 push ax
@@ -178,6 +142,126 @@ Main                    proc
 
 
 
+;_______________________________________________________________________________________________________________;
+;                                              <STD call>                                                       ;
+;;;;            Function "Read_attributes" read first, second, third and four (if there is) attributes       ;;;;
+;                                                                                                               ;
+;; Entry:       SI - the position from which start to read                                                     ;;
+;                                                                                                               ;
+;; Exit:        AL - first (-1 if not)                                                                         ;;
+;               DL - second (-1 if not)                                                                         ;
+;               CL - third (-1 if not)                                                                          ;
+;               BL - cnt bytes on attributes                                                                    ;
+;                                                                                                               ;
+;; Expected:    DS = CS                                                                                        ;;
+;                                                                                                               ;
+;; Destroyed:   SI                                                                                             ;;
+;_______________________________________________________________________________________________________________;
+
+Read_attributes         proc
+
+                xor ax, ax
+                mov bx, 0
+
+        @@read_first_attribute:
+                push bx
+                call Atoi_byte                  ; ax = color of string
+                pop bx
+
+                cmp al, -1d
+                je @@done
+
+                add si, 2d                      ; si = first symbol of string (skip '*_ '), '*' already skipped
+                mov bl, 3d                      ; cnt skip symbols ('__ ')
+
+
+        @@read_second_attribute:
+                push ax
+                push bx
+
+                call Atoi_byte
+
+                pop bx
+                mov dx, ax                      ; dx = color of frame
+                pop ax
+
+                cmp dl, -1d
+                je @@done
+                
+                add si, 2d                      ; si = first symbol of string (skip '*_ '), '*' already skipped
+                add bl, 3d                      ; cnt skip symbols ('__ ')
+                                       
+
+        @@read_third_attribute:
+                push ax
+                mov al, ds:[si]
+
+                call Read_hex_number
+                mov cx, ax
+                pop ax 
+
+                cmp cl, -1d
+                je @@done
+
+                add si, 2d                      ; si = first symbol of string (skip '_ ')
+                add bl, 2d                      ; cnt skip symbols ('_ ')
+
+
+        @@done:
+                ret
+
+                        endp
+
+
+
+;_______________________________________________________________________________________________________________;
+;                                              <STD call>                                                       ;
+;;;;            Function "Check_frame" mov cx addres of choosing frame                                       ;;;;
+;                                                                                                               ;
+;; Entry:       CL - number of frame                                                                           ;;
+;                                                                                                               ;
+;; Exit:        CX - addres of frame                                                                           ;;
+;                                                                                                               ;
+;; Expected:                                                                                                   ;;
+;                                                                                                               ;
+;; Destroyed:                                                                                                  ;;
+;_______________________________________________________________________________________________________________;
+
+Check_frame             proc
+
+        @@check_frame_1:
+                cmp cl, 1
+                jne @@check_frame_2
+                mov cx, offset frame_1
+                jmp @@done
+
+        @@check_frame_2:
+                cmp cl, 2
+                jne @@check_frame_3
+                mov cx, offset frame_2
+                jmp @@done
+
+        @@check_frame_3:
+                cmp cl, 3
+                jne @@check_frame_user
+                mov cx, offset frame_3
+                jmp @@done
+
+        @@check_frame_user:
+                cmp cl, 0
+                jne @@default_frame
+                mov cx, si
+                jmp @@done
+
+        @@default_frame:
+                mov cx, offset frame_3
+
+        @@done:
+                ret
+
+                        endp
+
+
 
 ;_______________________________________________________________________________________________________________;
 ;                                              <STD call>                                                       ;
@@ -187,7 +271,7 @@ Main                    proc
 ;                                                                                                               ;
 ;; Exit:        AL - number (if OK), in error Al = -1                                                          ;;
 ;                                                                                                               ;
-;; Expected:    DS = CS                                                                                         ;
+;; Expected:    DS = CS                                                                                        ;;
 ;                                                                                                               ;
 ;; Destroyed:   BX, SI                                                                                         ;;
 ;_______________________________________________________________________________________________________________;
@@ -228,7 +312,7 @@ Atoi_byte               proc
 ;                                                                                                               ;
 ;; Exit:        AL - number (if OK), in error Al = -1                                                          ;;
 ;                                                                                                               ;
-;; Expected:                                                                                                    ;
+;; Expected:                                                                                                   ;;
 ;                                                                                                               ;
 ;; Destroyed:                                                                                                  ;;
 ;_______________________________________________________________________________________________________________;
@@ -436,7 +520,7 @@ Print_Frame             proc
 
                 cmp bx, 1d
                 jna @@small_frame
-                jmp near ptr @@big_frame 
+                call Print_Big_Frame
                 ret
 
 
@@ -514,14 +598,7 @@ Print_Frame             proc
 		mov al, [si + 7d]               ; right-down corner
 		mov es:[di], ax		        ; draw right-down corner
 
-                jmp @@done
-
-
-        @@big_frame:
-                call Print_Big_Frame
-
-
-        @@done:
+                
                 ret
 
                         endp
@@ -681,4 +758,4 @@ frame_2         db 0DAh, 0C4h, 0BFh, 0B3h, 0B3h, 0C0h, 0C4h, 0D9h
 frame_3         db 003h, 003h, 003h, 004h, 004h, 003h, 003h, 003h
 
 
-end 		Start
+ end 		Start
