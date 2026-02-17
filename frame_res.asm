@@ -46,44 +46,37 @@ Main                    proc
                 mov es, bx
 
 
-                mov ah, BACK_COLOR
-                mov di, 0d
-                call Paint_Back
-
-
                 mov si, 82h                     ; first symbol in command line
                 call Read_attributes
-                cmp al, -1d
-                je @@no_first_attribute
-                cmp dl, -1d
-                je @@no_second_attribute
-                cmp cl, -1d
-                je @@no_third_attribute
 
-                xor di, di
-                mov di, cx                      ; save number of frame
-                call Check_frame
+
+                push ax
                 push cx
-                jmp @@check_len_string
-
-        @@no_first_attribute:
-                mov al, COLOR_S 
-                mov dl, COLOR_F
-                push offset frame_3
-                mov si, 82h
-                jmp @@check_len_string
-
-        @@no_second_attribute:
-                mov dl, COLOR_F 
-                push offset frame_3
-                mov si, 82h
-                add si, bx                      ; cnt skip symbols
-                jmp @@check_len_string
+                cmp ch, -1d
+                je @@no_third_attribute
+                mov ah, ch
+                jmp @@paint_background
 
         @@no_third_attribute:
-                push offset frame_3
-                mov si, 82h
-                add si, bx                      ; cnt skip symbols
+                mov ah, BACK_COLOR
+
+        @@paint_background:
+                push dx
+                push si
+                mov di, 0d
+                call Paint_Back
+                pop si
+                pop dx
+                pop cx
+                pop ax
+                
+                push cx
+                mov ch, 0
+                xor di, di
+                mov di, cx                      ; save number of frame
+                pop cx
+                call Check_attributes
+                push cx
                 jmp @@check_len_string
         
         
@@ -144,13 +137,14 @@ Main                    proc
 
 ;_______________________________________________________________________________________________________________;
 ;                                              <STD call>                                                       ;
-;;;;            Function "Read_attributes" read first, second, third and four (if there is) attributes       ;;;;
+;;;;            Function "Read_attributes" read first, second, third and fourth (if there is) attributes     ;;;;
 ;                                                                                                               ;
 ;; Entry:       SI - the position from which start to read                                                     ;;
 ;                                                                                                               ;
 ;; Exit:        AL - first (-1 if not)                                                                         ;;
 ;               DL - second (-1 if not)                                                                         ;
-;               CL - third (-1 if not)                                                                          ;
+;               CH - third (-1 if not)                                                                          ;
+;               CL - fourth (-1 if not)                                                                         ;
 ;               BL - cnt bytes on attributes                                                                    ;
 ;                                                                                                               ;
 ;; Expected:    DS = CS                                                                                        ;;
@@ -160,10 +154,12 @@ Main                    proc
 
 Read_attributes         proc
 
-                xor ax, ax
-                mov bx, 0
+                mov ax, 00FFh
+                xor bx, bx
+                mov cx, -1d
+                mov dx, 00FFh
 
-        @@read_first_attribute:
+        @@read_first_attribute:                 ; color of string
                 push bx
                 call Atoi_byte                  ; ax = color of string
                 pop bx
@@ -174,15 +170,12 @@ Read_attributes         proc
                 add si, 2d                      ; si = first symbol of string (skip '*_ '), '*' already skipped
                 mov bl, 3d                      ; cnt skip symbols ('__ ')
 
-
-        @@read_second_attribute:
+        @@read_second_attribute:                ; color of frame
                 push ax
                 push bx
-
                 call Atoi_byte
-
                 pop bx
-                mov dx, ax                      ; dx = color of frame
+                mov dl, al                      ; dl = color of frame
                 pop ax
 
                 cmp dl, -1d
@@ -190,14 +183,26 @@ Read_attributes         proc
                 
                 add si, 2d                      ; si = first symbol of string (skip '*_ '), '*' already skipped
                 add bl, 3d                      ; cnt skip symbols ('__ ')
-                                       
 
-        @@read_third_attribute:
+        @@read_third_attribute:                 ; color of background
+                push ax
+                push bx
+                call Atoi_byte
+                pop bx
+                mov ch, al
+                pop ax 
+
+                cmp ch, -1d
+                je @@done
+
+                add si, 2d                      ; si = first symbol of string (skip '*_ '), '*' already skipped
+                add bl, 3d                      ; cnt skip symbols ('__ ')        
+
+        @@read_fourth_attribute:                ; number of frame       
                 push ax
                 mov al, ds:[si]
-
                 call Read_hex_number
-                mov cx, ax
+                mov cl, al
                 pop ax 
 
                 cmp cl, -1d
@@ -206,6 +211,62 @@ Read_attributes         proc
                 add si, 2d                      ; si = first symbol of string (skip '_ ')
                 add bl, 2d                      ; cnt skip symbols ('_ ')
 
+        @@done:
+                ret
+
+                        endp
+
+
+
+;_______________________________________________________________________________________________________________;
+;                                              <STD call>                                                       ;
+;;;;            Function "Check_attributes" check first, second and fourth (if there is) attributes          ;;;;
+;                                                                                                               ;
+;; Entry:       AL - first attribute                                                                           ;;
+;               DL - second attribute                                                                           ;
+;               CH - third attribute                                                                            ;
+;               CL - fourth attribute                                                                           ;    
+;                                                                                                               ;
+;; Exit:        CX - addres of frame                                                                           ;;
+;                                                                                                               ;
+;; Expected:    DS = CS                                                                                        ;;
+;                                                                                                               ;
+;; Destroyed:                                                                                                  ;;
+;_______________________________________________________________________________________________________________;
+
+Check_attributes        proc
+
+                cmp al, -1d                     ; color of string
+                je @@no_first_attribute
+                cmp dl, -1d                     ; color of frame
+                je @@no_second_attribute
+                cmp ch, -1d                     ; color of background
+                je @@no_third_attribute
+                cmp cl, -1d                     ; number of frame
+                je @@no_fourth_attribute
+                call Check_frame
+                jmp @@done
+
+        @@no_first_attribute:
+                mov al, COLOR_S 
+                mov dl, COLOR_F
+                mov cx, offset frame_3
+                mov si, 82h
+                jmp @@done
+
+        @@no_second_attribute:
+                mov dl, COLOR_F 
+                mov cx, offset frame_3
+                mov si, 82h
+                add si, bx                      ; cnt skip symbols
+                jmp @@done
+
+        @@no_third_attribute:
+        @@no_fourth_attribute:
+                mov cx, offset frame_3
+                mov si, 82h
+                add si, bx                      ; cnt skip symbols
+                jmp @@done
 
         @@done:
                 ret
