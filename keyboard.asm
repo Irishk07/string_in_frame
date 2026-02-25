@@ -25,6 +25,8 @@ BYTES_OFFSET_S	equ ROW_OFFSET_S+BYTES_ON_SYMB*NUMBER_COLUMN_S
 COLOR_S		equ 04Fh
 COLOR_F		equ 0Ch
 
+PRESS           equ 057h                ; F11
+RELEASE         equ 0D7h                ; F11
 
 
 Start:
@@ -34,9 +36,6 @@ Start:
                 mov Default_offset, bx
                 mov bx, es
                 mov Default_segment, bx
-
-
-                int 09h
 
                 push 0
                 pop es
@@ -49,7 +48,6 @@ Start:
                 mov es:[bx + 2], ax                     ; segment of my func
 
                 sti                                     ; set interapt flag
-                int 09h
 
                 ; this code need save in memory (in paragraph = 16 bytes):
                 mov ax, 3100h
@@ -60,73 +58,48 @@ Start:
 
 
 
-My_interapt_9   proc
+My_interapt_9           proc
 
-                push ax bx cx dx si di bp ss ds es               ; save, because we change them
-
-                push cs
-                pop ds
-
-                ; draw symbol
-                push 0b800h
-                pop es
+                push sp ax bx cx dx si di bp ss ds es           ; save, because we change them                
 
                 in al, 60h
+                mov dl, al
 
-                cmp al, 32h                                     ; M
+        @@first_check:
+                cmp al, PRESS                                   ; press F11
+                jne @@second_check
+        
+        @@save_screen:
+                push 0b800h cs
+                pop es ds
+
+                mov si, ROW_OFFSET_F                        
+                mov di, offset screen_buffer
+                mov cx, 80d * 6d                                ; cnt words
+                cld
+                rep movsw                                       ; repeat cx times: mov es:[di++], ds:[si++]
+
+                push si cx di ax bx 0b800h cs
+                pop ds es
+                mov cx, 13d
+                mov dx, 5d                                      ; save 5 registers, need skip
+                call Print_registers
+                pop bx ax di cx si
+        
+                jmp @@finish_of_process
+
+        @@second_check:
+                cmp al, RELEASE                                 ; release F11
                 jne @@finish_of_process
 
-                push bp
-                mov bp, sp
-                mov cx, 10d
-                mov bx, offset registers + 5d
-        @@print_registers:
-                mov si, cx
-                shl si, 1
-                mov ax, ds:[bp + si]
-                shr si, 1
-                lea di, [bx]
-
-                push cx bx
-                call Itoa_hex
-                pop bx cx
-
-                add bx, 11d
-                loop @@print_registers
-                pop bp
-
-
-                xor cx, cx
-                mov cx, LEN_STRING
-
-                ; cnt rows
-                push ax
-                mov ax, cx
-                mov ah, 0
-                add ax, MAX_STRING_LEN  ; 80-2-2 (2 = space, 2 = frame)
-                xor dx, dx              
-                mov bx, MAX_STRING_LEN  
-                div bx                  ; ax = (cx + MAX_STRING_LEN - 1) / MAX_STRING_LEN - cnt rows
-                mov bx, ax
-                pop ax
-
-                push di ax cx dx bx
-                push offset frame
-                push bx
-                push cx
-                push COLOR_F
-                call Print_Frame
-                add sp, 8d
-                pop bx dx cx ax di
-
-
-                push si di ax dx
-                push offset registers
-                push COLOR_S
-                push cx
-                call Print_String
-                pop dx ax di si
+                push 0b800h cs
+                pop ds es
         
+                mov si, offset screen_buffer                            
+                mov di, ROW_OFFSET_F
+                mov cx, 80d * 6d                                ; cnt words
+                cld
+                rep movsw                                       ; repeat cx times: mov es:[di++], ds:[si++]
 
         @@finish_of_process:
                 ; can continue accept clicks
@@ -140,9 +113,10 @@ My_interapt_9   proc
                 mov al, 20h
                 out 20h, al
 
-                pop es ds ss bp di si dx cx bx ax
+                pop es ds ss bp di si dx cx bx ax            
+                add sp, 2d                                      ; because need pop sp
 
-                db  0eah                                ; code of command jmp
+                db  0eah                                        ; code of command jmp
                 Default_offset dw 0
                 Default_segment dw 0
 
@@ -152,7 +126,81 @@ My_interapt_9   proc
 
 ;_______________________________________________________________________________________________________________;
 ;                                              <STD call>                                                       ;
-;;;;            Function "Atoi_word" converts two byte (with two symbols) to a number                        ;;;;
+;;;;            Function "Print_registers" prints values of registers to video-memory                        ;;;;
+;                                                                                                               ;
+;; Entry:       AX, BX, CX, DX, SI, DI, BP, SS, DS, ES in stack                                                ;;
+;               CX - cnt registers                                                                              ;
+;               DX - cnt skip words to the top register                                                         ;
+;                                                                                                               ;
+;; Exit:                                                                                                       ;;
+;                                                                                                               ;
+;; Expected:    DS = CS                                                                                        ;;
+;               ES = 0b800h                                                                                     ;
+;                                                                                                               ;
+;; Destroyed:   SI, CX, DI, AX, BX                                                                             ;;
+;_______________________________________________________________________________________________________________;
+
+Print_registers         proc                
+
+                push bp
+                mov bp, sp
+                mov bx, offset registers + 5d
+                shl dx, 1
+        @@print_loop:
+                mov si, cx
+                shl si, 1
+                add si, 2d                      ; top of stack is return addres
+                add si, dx                      ; skip words in stack (maybe it is saved registers)
+                mov ax, ds:[bp + si]
+                shr si, 1
+                lea di, [bx]
+
+                push cx bx dx
+                call Itoa_hex
+                pop dx bx cx
+
+                add bx, 11d
+                loop @@print_loop
+                pop bp
+
+
+                xor cx, cx
+                mov cx, LEN_STRING
+
+                ; cnt rows
+                push ax
+                mov ax, cx
+                mov ah, 0
+                add ax, MAX_STRING_LEN          ; 80-2-2 (2 = space, 2 = frame)
+                xor dx, dx              
+                mov bx, MAX_STRING_LEN  
+                div bx                          ; ax = (cx + MAX_STRING_LEN - 1) / MAX_STRING_LEN - cnt rows
+                mov bx, ax
+                pop ax
+
+                push di ax cx dx bx
+                push offset frame
+                push bx
+                push cx
+                push COLOR_F
+                call Print_Frame
+                add sp, 8d
+                pop bx dx cx ax di
+
+                push si di ax dx
+                push offset registers
+                push COLOR_S
+                push cx
+                call Print_String
+                pop dx ax di si
+
+                ret
+                        endp
+
+
+;_______________________________________________________________________________________________________________;
+;                                              <STD call>                                                       ;
+;;;;            Function "Itoa_hex" converts hex number (2 bytes) to chars                                   ;;;;
 ;                                                                                                               ;
 ;; Entry:       AX - number                                                                                    ;;                               
 ;               DI - addres for write                                                                           ;
@@ -187,7 +235,7 @@ Itoa_hex                proc
 
 ;_______________________________________________________________________________________________________________;
 ;                                              <STD call>                                                       ;
-;;;;            Function "Read_hex_number" converts symbol to a number  (hex)                                ;;;;
+;;;;            Function "Digit_to_char" converts one hex digit to a char                                    ;;;;
 ;                                                                                                               ;
 ;; Entry:       DL - hex digit                                                                                 ;;
 ;                                                                                                               ;
@@ -219,7 +267,7 @@ Digit_to_char           proc
 
 ;_______________________________________________________________________________________________________________;
 ;                                              <Pascal>                                                         ;
-;;;;            Function "Print_String" prints string to video-memory from commang line                      ;;;;
+;;;;            Function "Print_String" prints string to video-memory                                        ;;;;
 ;                                                                                                               ;
 ;; Entry:       (SI) - the position of string from which string is printing                                    ;;
 ;               (AL) - color of string + back_ground                                                            ;
@@ -422,11 +470,13 @@ Print_Frame             proc    color_of_frame, len_of_string, cnt_of_rows, star
 
 
 
-registers   db 'ax = 0000, bx = 0000, cx = 0000, dx = 0000, si = 0000, di = 0000, bp = 0000, ss = 0000, ds = 0000, es = 0000', 0Dh
+registers       db 'cs = 0000, ip = 0000, sp = 0000, ax = 0000, bx = 0000, cx = 0000, dx = 0000, si = 0000, di = 0000, bp = 0000, ss = 0000, ds = 0000, es = 0000', 0Dh
 
 LEN_STRING      equ $ - registers
 
-frame       db 0D5h, 0CDh, 0B8h, 0C6h, 02Eh, 0B5h, 0D4h, 0CDh, 0BEh
+frame           db 0D5h, 0CDh, 0B8h, 0C6h, 02Eh, 0B5h, 0D4h, 0CDh, 0BEh
+
+screen_buffer   db 160d * 6d dup (0)
 
 end_my_interapt:
 
