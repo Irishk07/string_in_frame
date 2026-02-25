@@ -31,6 +31,9 @@ BACK_1          equ 0B1h
 BACK_2          equ 0B2h
 BACK_3          equ 0DBh
 
+PSP_LEN_COMMAND_LINE    equ 80h
+FIRST_SYMB_COMMAND_LINE equ 82h
+
 
 Start:          call Main
 	        mov ax, 4c00h
@@ -45,7 +48,7 @@ Main                    proc
                 mov es, bx
 
 
-                mov si, 82h                     ; first symbol in command line
+                mov si, FIRST_SYMB_COMMAND_LINE ; first symbol in command line
                 call Read_attributes
 
 
@@ -66,7 +69,7 @@ Main                    proc
                 push cx
                 mov ch, 0
                 xor di, di
-                mov di, cx                       ; save number of frame
+                mov di, cx                      ; save number of frame
                 pop cx
                 call Check_attributes
                 push bx
@@ -74,7 +77,7 @@ Main                    proc
 
         @@check_len_string:
                 xor cx, cx
-                mov cl, ds:[80h]	        ; len of command line (from PSP)
+                mov cl, ds:[PSP_LEN_COMMAND_LINE]	        
 	        cmp cl, 0d		        ; cl == 0 or no
                 je @@default_params
 
@@ -82,7 +85,7 @@ Main                    proc
                 sub cl, bl
                 cmp di, 0
                 jne @@user_params
-                sub cl, 9d + 1d                
+                sub cl, 9d + 1d                 ; 9 symbs for frame + space   
         @@user_params:
                 push ax
                 mov ax, cx
@@ -104,24 +107,24 @@ Main                    proc
         @@print_frame:
                 pop si
                 push di ax cx dx bx             ; save       
-                mov ah, dl
 
+                mov ah, dl
                 push si bx cx ax                ; args for func
                 call Print_Frame
                 add sp, 8d                      ; 4 arguments 
 
                 pop bx dx cx ax di
                 pop si
-                add si, 82h
+                add si, FIRST_SYMB_COMMAND_LINE
                 cmp di, 0
                 jne @@start_print_string
-                add si, 9d + 1d 
+                add si, 9d + 1d                 ; 9 symbs for frame + space 
         
 
         @@start_print_string:
                 push ax
                 xor ax, ax
-                mov al, ds:[80h]	        ; len of command line (from PSP)
+                mov al, ds:[PSP_LEN_COMMAND_LINE]	       
 	        cmp al, 0d		        ; cl == 0 or no
 	        jne @@with_args		        ; if (cl != 0) goto with_args 	
 
@@ -211,7 +214,7 @@ Read_attributes         proc
         @@read_number_of_frame:                  
                 push ax
                 mov al, ds:[si]
-                call Read_hex_number
+                call Atoi_char
                 mov cl, al
                 pop ax 
 
@@ -254,7 +257,7 @@ Check_attributes        proc
                 je @@no_color_of_background
                 cmp cl, -1d                     
                 je @@no_number_of_frame
-                call Check_frame
+                call Choose_frame
                 jmp @@done
 
         @@no_color_of_string:
@@ -287,7 +290,7 @@ Check_attributes        proc
 
 ;_______________________________________________________________________________________________________________;
 ;                                              <STD call>                                                       ;
-;;;;            Function "Check_frame" mov cx addres of choosing frame                                       ;;;;
+;;;;            Function "Choose_frame" mov cx addres of choosing frame                                       ;;;;
 ;                                                                                                               ;
 ;; Entry:       CL - number of frame                                                                           ;;
 ;                                                                                                               ;
@@ -298,10 +301,10 @@ Check_attributes        proc
 ;; Destroyed:                                                                                                  ;;
 ;_______________________________________________________________________________________________________________;
 
-Check_frame             proc
+Choose_frame             proc
 
                 cmp cl, 0
-                je @@check_frame_user
+                je @@Choose_frame_user
                 cmp cl, 3d
                 ja @@default_frame
 
@@ -315,7 +318,7 @@ Check_frame             proc
                 add cx, offset frame_1
                 jmp @@done
 
-        @@check_frame_user:
+        @@Choose_frame_user:
                 cmp cl, 0
                 jne @@default_frame
                 mov cx, si
@@ -333,11 +336,11 @@ Check_frame             proc
 
 ;_______________________________________________________________________________________________________________;
 ;                                              <STD call>                                                       ;
-;;;;            Function "Atoi_byte" converts two byte (with two symbols) to a number                        ;;;;
+;;;;            Function "Atoi_byte" converts two chars to a number                                          ;;;;
 ;                                                                                                               ;
-;; Entry:       SI - the position of the byte                                                                  ;;
+;; Entry:       SI - the position of the chars                                                                 ;;
 ;                                                                                                               ;
-;; Exit:        AL - number (if OK), in error Al = -1                                                          ;;
+;; Exit:        AL - number (if OK), in error Al = -1                                                          ;; TODO podumat'
 ;                                                                                                               ;
 ;; Expected:    DS = CS                                                                                        ;;
 ;                                                                                                               ;
@@ -347,7 +350,7 @@ Check_frame             proc
 Atoi_byte               proc
                 mov al, ds:[si]
 
-                call Read_hex_number
+                call Atoi_char
                 cmp al, -1
                 je @@error
 
@@ -357,7 +360,7 @@ Atoi_byte               proc
                 inc si
                 mov al, ds:[si]
 
-                call Read_hex_number
+                call Atoi_char
                 cmp al, -1
                 je @@error
 
@@ -374,7 +377,7 @@ Atoi_byte               proc
 
 ;_______________________________________________________________________________________________________________;
 ;                                              <STD call>                                                       ;
-;;;;            Function "Read_hex_number" converts symbol to a number  (hex)                                ;;;;
+;;;;            Function "Atoi_char" converts symbol to a number  (hex)                                ;;;;
 ;                                                                                                               ;
 ;; Entry:       AL - symbol                                                                                    ;;
 ;                                                                                                               ;
@@ -385,7 +388,7 @@ Atoi_byte               proc
 ;; Destroyed:                                                                                                  ;;
 ;_______________________________________________________________________________________________________________;
 
-Read_hex_number         proc
+Atoi_char                proc
 
         @@check_number:
                 cmp al, '0'
@@ -426,7 +429,7 @@ Read_hex_number         proc
 
 ;_______________________________________________________________________________________________________________;
 ;                                              <Pascal>                                                         ;
-;;;;            Function "Print_String" prints string to video-memory from commang line                      ;;;;
+;;;;            Function "Print_String" prints string to video-memory from command line                      ;;;;
 ;                                                                                                               ;
 ;; Entry:       (SI) - the position of string from which string is printing                                    ;;
 ;               (AL) - color of string + back_ground                                                            ;
@@ -608,7 +611,7 @@ Print_Frame             proc    color_of_frame, len_string, cnt_of_rows, start_p
                 stosw                           ; mov es:[di++], ax
 
                 push cx
-        @@print_top:
+        @@print_top: ; TODO macro
                 mov al, [si + 1d]
                 stosw
                 loop @@print_top
