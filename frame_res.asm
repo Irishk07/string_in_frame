@@ -617,14 +617,13 @@ Print_Frame             proc    color_of_frame, len_string, cnt_of_rows, start_p
                 stosw                           ; mov es:[di++], ax
 
                 push cx
-        @@print_top: ; TODO macro
                 mov al, [si + 1d]
-                stosw
-                loop @@print_top
+                rep stosw
                 pop cx
 
                 mov al, [si + 2d]
                 stosw
+
 
                 add dx, BYTES_IN_ROW
                 mov di, dx
@@ -638,10 +637,8 @@ Print_Frame             proc    color_of_frame, len_string, cnt_of_rows, start_p
                 pop bx                          ; bx = cnt symb
                 push cx                         ; in stack cnt rows
                 mov cx, bx                      ; cx = cnt symb
-        @@print_middle:
                 mov al, [si + 4d]
-                stosw
-                loop @@print_middle
+                rep stosw                       ; // TODO rep stosw              
                 
                 mov al, [si + 5d]
                 mov es:[di], ax
@@ -652,13 +649,13 @@ Print_Frame             proc    color_of_frame, len_string, cnt_of_rows, start_p
                 push bx                         ; in stack cnt symb
                 loop @@print_center
                 
+
                 pop cx
                 mov al, [si + 6d]
                 stosw                           ; mov es:[di++], ax
-        @@print_down:
+
                 mov al, [si + 7d]
-                stosw
-                loop @@print_down
+                rep stosw
 
                 mov al, [si + 8d]
                 stosw
