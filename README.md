@@ -13,11 +13,11 @@
 
 ### Дефолтные рамки:
 * Рамка 1 \
-![Рамка 1](frames/frame_1.jpg)
+![Рамка 1](frames/frame1.png)
 * Рамка 2 \
-![Рамка 2](frames/frame_2.jpg)
+![Рамка 2](frames/frame2.png)
 * Рамка 3 \
-![Рамка 3](frames/frame_3.jpg)
+![Рамка 3](frames/frame3.png)
 
 
 ### Режимы запуска:
