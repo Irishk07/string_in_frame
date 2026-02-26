@@ -5,6 +5,12 @@ org 100h
 locals @@
 
 
+; first = color of string
+; second = color of frame
+; third = color of back
+; fourth = number of default frame (1-3) or 0 if user frame (9 symbs for frame)
+
+
 BYTES_ON_SYMB	equ 2d
 SYMBS_IN_ROW	equ 80d
 BYTES_IN_ROW	equ BYTES_ON_SYMB*SYMBS_IN_ROW
@@ -662,6 +668,32 @@ Print_Frame             proc    color_of_frame, len_string, cnt_of_rows, start_p
                         endp
 
 
+;_______________________________________________________________________________________________________________;
+;;;;            Macro "PRINT_ONE_BACK" paints ont block (6 * 80d) of the background                          ;;;;
+;                                                                                                               ;
+;; Entry:       DI - the position of segment video-memory from which we start printing into the video memory    ;
+;               AH - color of back                                                                              ;
+;               AL - symbol for back                                                                            ;
+;               SI - symbs in one block                                                                         ;
+;                                                                                                               ;
+;; Exit:                                                                                                       ;;
+;                                                                                                               ;
+;; Expected:    ES = 0b800h (segment of video-memory)                                                          ;;
+;                                                                                                               ;
+;; Destroyed:   DI, AX, CX                                                                                     ;; 
+;_______________________________________________________________________________________________________________;
+
+PRINT_ONE_BACK          macro code
+        LOCAL   print_one_back
+
+        print_one_back:
+                mov es:[di], ax		        
+		add di, 2d
+
+                loop print_one_back
+
+                mov cx, si 
+                        endm
 
 ;_______________________________________________________________________________________________________________;
 ;                                          <STD call>                                                           ;
@@ -676,18 +708,6 @@ Print_Frame             proc    color_of_frame, len_string, cnt_of_rows, start_p
 ;                                                                                                               ;
 ;; Destroyed:   DI, AX, CX, SI                                                                                 ;; 
 ;_______________________________________________________________________________________________________________;
-
-PRINT_ONE_BACK          macro code
-        LOCAL   print_one_back
-
-        print_one_back:
-                mov es:[di], ax		        
-		add di, 2d
-
-                loop print_one_back
-
-                mov cx, si 
-                        endm
 
 Paint_Back              proc
 
