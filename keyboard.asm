@@ -25,8 +25,8 @@ BYTES_OFFSET_S	equ ROW_OFFSET_S+BYTES_ON_SYMB*NUMBER_COLUMN_S
 COLOR_S		equ 04Fh
 COLOR_F		equ 0Ch
 
-PRESS           equ 057h                ; F11
-RELEASE         equ 0D7h                ; F11
+APPEAR          equ 057h                ; F11
+DISAPPEAR       equ 058h                ; F12
 
 
 Start:
@@ -66,7 +66,7 @@ My_interapt_9           proc
                 mov dl, al
 
         @@first_check:
-                cmp al, PRESS                                   ; press F11
+                cmp al, APPEAR                                  
                 jne @@second_check
         
         @@save_screen:
@@ -79,17 +79,17 @@ My_interapt_9           proc
                 cld
                 rep movsw                                       ; repeat cx times: mov es:[di++], ds:[si++]
 
-                push si cx di ax bx 0b800h cs
+                push si cx di dx ax bx 0b800h cs
                 pop ds es
                 mov cx, 13d
-                mov dx, 5d                                      ; save 5 registers, need skip
+                mov dx, 6d                                      ; save 5 registers, need skip
                 call Print_registers
-                pop bx ax di cx si
+                pop bx ax dx di cx si
         
                 jmp @@finish_of_process
 
         @@second_check:
-                cmp al, RELEASE                                 ; release F11
+                cmp al, DISAPPEAR                               
                 jne @@finish_of_process
 
                 push 0b800h cs
@@ -113,6 +113,21 @@ My_interapt_9           proc
                 mov al, 20h
                 out 20h, al
 
+                cmp dl, APPEAR
+                je @@done
+
+                cmp dl, DISAPPEAR
+                je @@done
+
+                jmp @@ful_done
+
+        @@done:
+                pop es ds ss bp di si dx cx bx ax            
+                add sp, 2d                                      ; because need pop sp
+
+                iret
+
+        @@ful_done:
                 pop es ds ss bp di si dx cx bx ax            
                 add sp, 2d                                      ; because need pop sp
 
@@ -134,14 +149,12 @@ My_interapt_9           proc
 ;                                                                                                               ;
 ;; Exit:                                                                                                       ;;
 ;                                                                                                               ;
-;; Expected:    DS = CS                                                                                        ;;
-;               ES = 0b800h                                                                                     ;
+;; Expected:    ES = 0b800h                                                                                    ;;
 ;                                                                                                               ;
 ;; Destroyed:   SI, CX, DI, AX, BX                                                                             ;;
 ;_______________________________________________________________________________________________________________;
 
-Print_registers         proc                
-
+Print_registers         proc   
                 push bp
                 mov bp, sp
                 mov bx, offset registers + 5d
@@ -151,9 +164,8 @@ Print_registers         proc
                 shl si, 1
                 add si, 2d                      ; top of stack is return addres
                 add si, dx                      ; skip words in stack (maybe it is saved registers)
-                mov ax, ds:[bp + si]
-                shr si, 1
-                lea di, [bx]
+                mov ax, ss:[bp + si]
+                mov di, bx
 
                 push cx bx dx
                 call Itoa_hex
@@ -179,18 +191,14 @@ Print_registers         proc
                 pop ax
 
                 push di ax cx dx bx
-                push offset frame
-                push bx
-                push cx
-                push COLOR_F
+                mov ah, COLOR_F
+                mov si, offset frame
                 call Print_Frame
-                add sp, 8d
                 pop bx dx cx ax di
 
                 push si di ax dx
-                push offset registers
-                push COLOR_S
-                push cx
+                mov si, offset registers
+                mov ah, COLOR_S
                 call Print_String
                 pop dx ax di si
 
@@ -222,7 +230,7 @@ Itoa_hex                proc
                 mov dx, bx
                 and dx, 000Fh           ; last digit
                 call Digit_to_char
-                mov [di], al
+                mov ds:[di], al
                 dec di
                 shr bx, 4d 
                 loop @@print_one_digit
@@ -269,9 +277,9 @@ Digit_to_char           proc
 ;                                              <Pascal>                                                         ;
 ;;;;            Function "Print_String" prints string to video-memory                                        ;;;;
 ;                                                                                                               ;
-;; Entry:       (SI) - the position of string from which string is printing                                    ;;
-;               (AL) - color of string + back_ground                                                            ;
-;               (CL) - len of printing string                                                                   ;
+;; Entry:       SI - the position of string from which string is printing                                      ;;
+;               AH - color of string + back_ground                                                              ;
+;               CL - len of printing string                                                                     ;
 ;                                                                                                               ;
 ;; Exit:                                                                                                       ;;
 ;                                                                                                               ;
@@ -283,12 +291,7 @@ Digit_to_char           proc
 ;_______________________________________________________________________________________________________________;
 
 Print_String            proc
-                push bp
-                mov bp, sp
-			
-		mov si, [bp + 8d]
-                mov cx, [bp + 4d]
-
+                push ax
                 mov ax, cx
                 mov ah, 0
                 add ax, MAX_STRING_LEN  ; 80-2-2 (2 = space, 2 = frame)
@@ -297,8 +300,7 @@ Print_String            proc
                 div bx                  ; ax = (cx + MAX_STRING_LEN - 1) / MAX_STRING_LEN - cnt rows
                 mov bx, ax
 
-                mov ax, [bp + 6d]
-		mov ah, al
+                pop ax
 
                 push cx bx
 
@@ -352,13 +354,10 @@ Print_String            proc
                 dec bx
                 add di, 4d*2d
                 jmp @@print_loop_all
-
                         
         @@done:
                 pop bx cx
-                pop bp
-
-		ret 6
+		ret
 
                         endp
 
@@ -368,10 +367,10 @@ Print_String            proc
 ;                                          <CDECL>                                                              ;
 ;;;;            Function "Print_Frame" prints a frame around the string to video-memory                      ;;;;
 ;                                                                                                               ;
-;; Entry:       (AH) - color of frame + back_groud                                                              ;
-;               (CX) - len of string                                                                            ;
-;               (BX) - cnt rows                                                                                 ;
-;               (SI) - position from which start symbols for frame                                              ;
+;; Entry:       AH - color of frame + back_groud                                                                ;
+;               CX - len of string                                                                              ;
+;               BX - cnt rows                                                                                   ;
+;               SI - position from which start symbols for frame                                                ;
 ;                                                                                                               ;
 ;; Exit:                                                                                                       ;;
 ;                                                                                                               ;
@@ -381,13 +380,7 @@ Print_String            proc
 ;; Destroyed:   DI, AX, CX, DX, BX                                                                             ;; 
 ;_______________________________________________________________________________________________________________;
 
-Print_Frame             proc    color_of_frame, len_of_string, cnt_of_rows, start_pos
-
-                mov ax, color_of_frame
-                mov ah, al
-                mov cx, len_of_string
-                mov bx, cnt_of_rows
-                mov si, start_pos
+Print_Frame             proc
 
                 cmp bx, 1d
                 je @@small_frame
@@ -418,10 +411,8 @@ Print_Frame             proc    color_of_frame, len_of_string, cnt_of_rows, star
                 stosw                           ; mov es:[di++], ax
 
                 push cx
-        @@print_top:
                 mov al, [si + 1d]
-                stosw
-                loop @@print_top
+                rep stosw
                 pop cx
 
                 mov al, [si + 2d]
@@ -439,10 +430,8 @@ Print_Frame             proc    color_of_frame, len_of_string, cnt_of_rows, star
                 pop bx                          ; bx = cnt symb
                 push cx                         ; in stack cnt rows
                 mov cx, bx                      ; cx = cnt symb
-        @@print_middle:
                 mov al, [si + 4d]
-                stosw
-                loop @@print_middle
+                rep stosw
                 
                 mov al, [si + 5d]
                 mov es:[di], ax
@@ -456,11 +445,10 @@ Print_Frame             proc    color_of_frame, len_of_string, cnt_of_rows, star
                 pop cx
                 mov al, [si + 6d]
                 stosw                           ; mov es:[di++], ax
-        @@print_down:
+                
                 mov al, [si + 7d]
-                stosw
-                loop @@print_down
-
+                rep stosw
+                
                 mov al, [si + 8d]
                 stosw
                 
