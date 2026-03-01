@@ -33,32 +33,32 @@ Start:
                 ; save old function address
                 mov ax, 3509h
                 int 21h
-                mov Default_offset, bx
+                mov Default_offset_9, bx
                 mov bx, es
-                mov Default_segment, bx
+                mov Default_segment_9, bx
 
                 push 0
                 pop es
-                mov bx, 4 * 09h                         ; offset of cell 09h in iterapt table
+                mov bx, 4 * 09h                         ; offset of cell 09h in interrupt table
 
-                cli                                     ; clear interapt flag
+                cli                                     ; clear interrupt flag
 
-                mov es:[bx], offset My_interapt_9       ; offset of my func
+                mov es:[bx], offset My_interrupt_9      ; offset of my func
                 mov ax, cs
                 mov es:[bx + 2], ax                     ; segment of my func
 
-                sti                                     ; set interapt flag
+                sti                                     ; set interrupt flag
 
                 ; this code need save in memory (in paragraph = 16 bytes):
                 mov ax, 3100h
-                mov dx, offset end_my_interapt
+                mov dx, offset end_my_interrupt
                 shr dx, 4
                 inc dx
                 int 21h
 
 
 
-My_interapt_9           proc
+My_interrupt_9           proc
 
                 push sp ax bx cx dx si di bp ss ds es           ; save, because we change them                
 
@@ -74,7 +74,7 @@ My_interapt_9           proc
                 pop es ds
 
                 mov si, ROW_OFFSET_F                        
-                mov di, offset screen_buffer
+                mov di, offset save_buffer
                 mov cx, 80d * 6d                                ; cnt words
                 cld
                 rep movsw                                       ; repeat cx times: mov es:[di++], ds:[si++]
@@ -95,7 +95,7 @@ My_interapt_9           proc
                 push 0b800h cs
                 pop ds es
         
-                mov si, offset screen_buffer                            
+                mov si, offset save_buffer                            
                 mov di, ROW_OFFSET_F
                 mov cx, 80d * 6d                                ; cnt words
                 cld
@@ -109,7 +109,7 @@ My_interapt_9           proc
                 and al, not 80h
                 out 61h, al
 
-                ; can continue process iterapts
+                ; can continue process interrupts
                 mov al, 20h
                 out 20h, al
 
@@ -132,8 +132,8 @@ My_interapt_9           proc
                 add sp, 2d                                      ; because need pop sp
 
                 db  0eah                                        ; code of command jmp
-                Default_offset dw 0
-                Default_segment dw 0
+                Default_offset_9 dw 0
+                Default_segment_9 dw 0
 
                         endp
 
@@ -164,7 +164,7 @@ Print_registers         proc
                 shl si, 1
                 add si, 2d                      ; top of stack is return addres
                 add si, dx                      ; skip words in stack (maybe it is saved registers)
-                mov ax, ss:[bp + si]
+                mov ax, [bp + si]
                 mov di, bx
 
                 push cx bx dx
@@ -190,11 +190,11 @@ Print_registers         proc
                 mov bx, ax
                 pop ax
 
-                push di ax cx dx bx
+                push di ax cx dx bx si
                 mov ah, COLOR_F
                 mov si, offset frame
                 call Print_Frame
-                pop bx dx cx ax di
+                pop si bx dx cx ax di
 
                 push si di ax dx
                 mov si, offset registers
@@ -274,7 +274,7 @@ Digit_to_char           proc
 
 
 ;_______________________________________________________________________________________________________________;
-;                                              <Pascal>                                                         ;
+;                                              <STD call>                                                       ;
 ;;;;            Function "Print_String" prints string to video-memory                                        ;;;;
 ;                                                                                                               ;
 ;; Entry:       SI - the position of string from which string is printing                                      ;;
@@ -364,7 +364,37 @@ Print_String            proc
 
 
 ;_______________________________________________________________________________________________________________;
-;                                          <CDECL>                                                              ;
+;                                          <STD call>                                                           ;
+;;;;            Macro "PRINT_ONE_ROW" prints one row of frame to video-memory                                ;;;;
+;                                                                                                               ;
+;; Entry:       CX - len of middle of string                                                                   ;;
+;               DI - position, where the left symb should be                                                    ;
+;               SI - position of left symb for frame                                                            ;
+;                                                                                                               ;
+;; Exit:                                                                                                       ;;
+;                                                                                                               ;
+;; Expected:    ES = 0b800h (segment of video-memory)                                                          ;;
+;                                                                                                               ;
+;; Destroyed:   DI, AX                                                                                         ;; 
+;_______________________________________________________________________________________________________________;
+
+PRINT_ONE_ROW           macro code
+                mov al, [si]
+                stosw                   ; mov es:[di++], ax
+
+                push cx
+                mov al, [si + 1d]
+                rep stosw               ; stosw cx times
+                pop cx
+
+                mov al, [si + 2d]
+                stosw
+                        endm
+
+
+
+;_______________________________________________________________________________________________________________;
+;                                          <STD call>                                                           ;
 ;;;;            Function "Print_Frame" prints a frame around the string to video-memory                      ;;;;
 ;                                                                                                               ;
 ;; Entry:       AH - color of frame + back_groud                                                                ;
@@ -377,7 +407,7 @@ Print_String            proc
 ;; Expected:    ES = 0b800h (segment of video-memory)                                                          ;;
 ;               DS = CS                                                                                         ;
 ;                                                                                                               ;
-;; Destroyed:   DI, AX, CX, DX, BX                                                                             ;; 
+;; Destroyed:   DI, AX, CX, DX, BX, SI                                                                         ;; 
 ;_______________________________________________________________________________________________________________;
 
 Print_Frame             proc
@@ -405,52 +435,18 @@ Print_Frame             proc
 
 
         @@print_frame:
-                mov dx, di
+                PRINT_ONE_ROW
 
-                mov al, [si]
-                stosw                           ; mov es:[di++], ax
-
-                push cx
-                mov al, [si + 1d]
-                rep stosw
-                pop cx
-
-                mov al, [si + 2d]
-                stosw
-
-                add dx, BYTES_IN_ROW
-                mov di, dx
+                add si, 3d
                 add bx, 2d
-                push cx                         ; in stack cnt symbs
-                mov cx, bx                      ; cx = bx = cnt rows
         @@print_center:
-                mov al, [si + 3d]       
-                stosw                          
-
-                pop bx                          ; bx = cnt symb
-                push cx                         ; in stack cnt rows
-                mov cx, bx                      ; cx = cnt symb
-                mov al, [si + 4d]
-                rep stosw
+                PRINT_ONE_ROW
+                dec bx
+                cmp bx, 0
+                jne @@print_center
                 
-                mov al, [si + 5d]
-                mov es:[di], ax
-                
-                add dx, BYTES_IN_ROW
-                mov di, dx
-                pop cx                          ; cx = cnt rows
-                push bx                         ; in stack cnt symb
-                loop @@print_center
-                
-                pop cx
-                mov al, [si + 6d]
-                stosw                           ; mov es:[di++], ax
-                
-                mov al, [si + 7d]
-                rep stosw
-                
-                mov al, [si + 8d]
-                stosw
+                add si, 3d
+                PRINT_ONE_ROW
                 
                 ret
 
@@ -464,9 +460,11 @@ LEN_STRING      equ $ - registers
 
 frame           db 0D5h, 0CDh, 0B8h, 0C6h, 02Eh, 0B5h, 0D4h, 0CDh, 0BEh
 
-screen_buffer   db 160d * 6d dup (0)
+save_buffer     db 160d * 6d dup (0)
 
-end_my_interapt:
+draw_buffer     db 160d * 6d dup (0)
+
+end_my_interrupt:
 
 
 end Start
