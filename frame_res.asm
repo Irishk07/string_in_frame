@@ -565,6 +565,41 @@ Print_My_Message        proc
 
 
 ;_______________________________________________________________________________________________________________;
+;                                          <STD call>                                                           ;
+;;;;            Macro "PRINT_ONE_ROW" prints one row of frame to video-memory                                ;;;;
+;                                                                                                               ;
+;; Entry:       CX - len of middle of string                                                                   ;;
+;               DI - position, where the left symb should be                                                    ;
+;               SI - position of left symb for frame                                                            ;
+;               DX - offset to next row                                                                         ;
+;                                                                                                               ;
+;; Exit:                                                                                                       ;;
+;                                                                                                               ;
+;; Expected:    ES = 0b800h (segment of video-memory)                                                          ;;
+;                                                                                                               ;
+;; Destroyed:   DI, AX                                                                                         ;; 
+;_______________________________________________________________________________________________________________;
+
+PRINT_ONE_ROW           macro code
+
+                mov al, [si]
+                stosw                   ; mov es:[di++], ax
+
+                push cx
+                mov al, [si + 1d]
+                rep stosw               ; stosw cx times
+                pop cx
+
+                mov al, [si + 2d]
+                stosw
+
+                add dx, BYTES_IN_ROW
+                mov di, dx
+                        endm
+
+
+
+;_______________________________________________________________________________________________________________;
 ;                                          <CDECL>                                                              ;
 ;;;;            Function "Print_Frame" prints a frame around the string to video-memory                      ;;;;
 ;                                                                                                               ;
@@ -582,11 +617,11 @@ Print_My_Message        proc
 ;_______________________________________________________________________________________________________________;
 
 Print_Frame             proc    color_of_frame, len_string, cnt_of_rows, start_pos
-
                 mov ax, color_of_frame
                 mov cx, len_string
                 mov bx, cnt_of_rows
                 mov si, start_pos
+                push si
 
                 cmp bx, 1d
                 je @@small_frame
@@ -609,57 +644,23 @@ Print_Frame             proc    color_of_frame, len_string, cnt_of_rows, start_p
                 mov di, ax
                 pop ax
 
-
         @@print_frame:
                 mov dx, di
 
-                mov al, [si]
-                stosw                           ; mov es:[di++], ax
+                PRINT_ONE_ROW
 
-                push cx
-                mov al, [si + 1d]
-                rep stosw
-                pop cx
-
-                mov al, [si + 2d]
-                stosw
-
-
-                add dx, BYTES_IN_ROW
-                mov di, dx
+                add si, 3d
                 add bx, 2d
-                push cx                         ; in stack cnt symbs
-                mov cx, bx                      ; cx = bx = cnt rows
         @@print_center:
-                mov al, [si + 3d]       
-                stosw                          
-
-                pop bx                          ; bx = cnt symb
-                push cx                         ; in stack cnt rows
-                mov cx, bx                      ; cx = cnt symb
-                mov al, [si + 4d]
-                rep stosw                       ; // TODO rep stosw              
+                PRINT_ONE_ROW
+                dec bx
+                cmp bx, 0
+                jne @@print_center
                 
-                mov al, [si + 5d]
-                mov es:[di], ax
+                add si, 3d
+                PRINT_ONE_ROW
                 
-                add dx, BYTES_IN_ROW
-                mov di, dx
-                pop cx                          ; cx = cnt rows
-                push bx                         ; in stack cnt symb
-                loop @@print_center
-                
-
-                pop cx
-                mov al, [si + 6d]
-                stosw                           ; mov es:[di++], ax
-
-                mov al, [si + 7d]
-                rep stosw
-
-                mov al, [si + 8d]
-                stosw
-                
+                pop si
                 ret
 
                         endp
