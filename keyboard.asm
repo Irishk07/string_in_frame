@@ -28,6 +28,8 @@ COLOR_F		equ 0Ch
 APPEAR          equ 057h                ; F11
 DISAPPEAR       equ 058h                ; F12
 
+BUFFERS_SIZE    equ 160d * 6d
+
 
 Start:
                 ; save old function address
@@ -36,6 +38,13 @@ Start:
                 mov Default_offset_9, bx
                 mov bx, es
                 mov Default_segment_9, bx
+
+                ;mov ax, 3508h
+                ;int 21h
+                ;mov Default_offset_8, bx
+                ;mov bx, es
+                ;mov Default_segment_8, bx
+;
 
                 push 0
                 pop es
@@ -48,6 +57,8 @@ Start:
                 mov es:[bx + 2], ax                     ; segment of my func
 
                 sti                                     ; set interrupt flag
+
+                ;int 09h
 
                 ; this code need save in memory (in paragraph = 16 bytes):
                 mov ax, 3100h
@@ -164,7 +175,7 @@ Print_registers         proc
                 shl si, 1
                 add si, 2d                      ; top of stack is return addres
                 add si, dx                      ; skip words in stack (maybe it is saved registers)
-                mov ax, [bp + si]
+                mov ax, ss:[bp + si]
                 mov di, bx
 
                 push cx bx dx
@@ -179,7 +190,6 @@ Print_registers         proc
                 xor cx, cx
                 mov cx, LEN_STRING
 
-                ; cnt rows
                 push ax
                 mov ax, cx
                 mov ah, 0
@@ -187,20 +197,33 @@ Print_registers         proc
                 xor dx, dx              
                 mov bx, MAX_STRING_LEN  
                 div bx                          ; ax = (cx + MAX_STRING_LEN - 1) / MAX_STRING_LEN - cnt rows
-                mov bx, ax
+                mov bx, ax                      ; bx = cnt rows
                 pop ax
 
-                push di ax cx dx bx si
+                push es di ax cx dx bx si
+                push cs
+                pop es                          ; es = cs
                 mov ah, COLOR_F
                 mov si, offset frame
+                mov di, offset draw_buffer
                 call Print_Frame
                 pop si bx dx cx ax di
 
                 push si di ax dx
                 mov si, offset registers
                 mov ah, COLOR_S
+                mov di, offset draw_buffer
                 call Print_String
-                pop dx ax di si
+                pop dx ax di si es              ; es = 0b800h
+
+                push cx di si
+                mov cx, BUFFERS_SIZE
+                shr cx, 1                       ; cx = cnt words
+                mov di, ROW_OFFSET_F
+                mov si, offset draw_buffer
+                cld
+                rep movsw                       ; repeat cx times: mov es:[di++], ds:[si++]
+                pop si di cx
 
                 ret
                         endp
@@ -275,20 +298,22 @@ Digit_to_char           proc
 
 ;_______________________________________________________________________________________________________________;
 ;                                              <STD call>                                                       ;
-;;;;            Function "Print_String" prints string to video-memory                                        ;;;;
+;;;;            Function "Print_String" prints string to buffer                                              ;;;;
 ;                                                                                                               ;
 ;; Entry:       SI - the position of string from which string is printing                                      ;;
 ;               AH - color of string + back_ground                                                              ;
 ;               CL - len of printing string                                                                     ;
+;               DI - address of buffer                                                                          ;
 ;                                                                                                               ;
 ;; Exit:                                                                                                       ;;
 ;                                                                                                               ;
-;; Expected:    ES = 0b800h (segment of video-memory)                                                          ;;
-;               DS = CS                                                                                         ;
+;; Expected:    ES = CS                                                                                        ;;
 ;                                                                                                               ;
 ;                                                                                                               ;
 ;; Destroyed:   SI, DI, AX, DX                                                                                 ;;
 ;_______________________________________________________________________________________________________________;
+
+                rep movsw                       ; repeat cx times: mov es:[di++], ds:[si++]
 
 Print_String            proc
                 push ax
@@ -298,13 +323,11 @@ Print_String            proc
                 xor dx, dx              
                 mov bx, MAX_STRING_LEN  
                 div bx                  ; ax = (cx + MAX_STRING_LEN - 1) / MAX_STRING_LEN - cnt rows
-                mov bx, ax
-
+                mov bx, ax              ; bx = cnt rows
                 pop ax
 
                 push cx bx
-
-                mov di, ROW_OFFSET_S + 2d*2d
+                add di, ROW_OFFSET_S - ROW_OFFSET_F + 2d*2d
 
         @@print_loop_all:
                 cmp bx, 1
@@ -313,40 +336,30 @@ Print_String            proc
                 mov bx, ax
                 mov ax, cx
 
-                shr cx, 1d                      ; cx >> 1 - cx /= 2
+                shr cx, 1d              ; cx >> 1 - cx /= 2
                 mov ax, 40d
-                sub ax, cx                      ; ax = 40 - cx
-                shl ax, 1                       ; ax = ax * 2
-                add ax, di
-
-                mov di, ax
+                sub ax, cx              ; ax = 40 - cx
+                shl ax, 1               ; ax = ax * 2
+                add di, ax
                 sub di, 2d*2d
                 mov ax, bx
 
         @@print_loop:
-                mov al, ds:[si]		; read symbol of string from PSP
+                mov al, ds:[si]		; read symbol of string
                 cmp al, 0Dh		; al == EOS or no
                 je @@done       	; if (al == EOS) goto done
-                
-                mov es:[di], ax		; show symbol+attribute
-                
-                add di, 2		; di += 2
+                stosw
                 inc si			; si++
-
                 jmp @@print_loop
 
 
         @@print_all_row:
                 push cx
                 mov cx, MAX_STRING_LEN
-
         @@print_row:
                 mov al, ds:[si]         ; read symbol of string from PSP
-                mov es:[di], ax		; show symbol+attribute
-                
-                add di, 2d		; di += 2
+                stosw                   ; mov es:[di++], ax
                 inc si	
-
                 loop @@print_row
 
                 pop cx
@@ -364,7 +377,6 @@ Print_String            proc
 
 
 ;_______________________________________________________________________________________________________________;
-;                                          <STD call>                                                           ;
 ;;;;            Macro "PRINT_ONE_ROW" prints one row of frame to video-memory                                ;;;;
 ;                                                                                                               ;
 ;; Entry:       CX - len of middle of string                                                                   ;;
@@ -379,15 +391,15 @@ Print_String            proc
 ;_______________________________________________________________________________________________________________;
 
 PRINT_ONE_ROW           macro code
-                mov al, [si]
+                mov al, ds:[si]
                 stosw                   ; mov es:[di++], ax
 
                 push cx
-                mov al, [si + 1d]
+                mov al, ds:[si + 1d]
                 rep stosw               ; stosw cx times
                 pop cx
 
-                mov al, [si + 2d]
+                mov al, ds:[si + 2d]
                 stosw
                         endm
 
@@ -395,46 +407,24 @@ PRINT_ONE_ROW           macro code
 
 ;_______________________________________________________________________________________________________________;
 ;                                          <STD call>                                                           ;
-;;;;            Function "Print_Frame" prints a frame around the string to video-memory                      ;;;;
+;;;;            Function "Print_Frame" print frame to buffer                                                 ;;;;
 ;                                                                                                               ;
-;; Entry:       AH - color of frame + back_groud                                                                ;
-;               CX - len of string                                                                              ;
+;; Entry:       AH - color of frame + back_groud                                                               ;;
 ;               BX - cnt rows                                                                                   ;
 ;               SI - position from which start symbols for frame                                                ;
+;               DI - address of buffer                                                                          ;
 ;                                                                                                               ;
 ;; Exit:                                                                                                       ;;
 ;                                                                                                               ;
-;; Expected:    ES = 0b800h (segment of video-memory)                                                          ;;
-;               DS = CS                                                                                         ;
+;; Expected:    DS = ES = CS                                                                                   ;;
 ;                                                                                                               ;
 ;; Destroyed:   DI, AX, CX, DX, BX, SI                                                                         ;; 
 ;_______________________________________________________________________________________________________________;
 
 Print_Frame             proc
-
-                cmp bx, 1d
-                je @@small_frame
-                
-                mov di, ROW_OFFSET_F
+                ; print frame in draw_buffer
                 mov cx, SYMBS_IN_ROW-2d
-                jmp @@print_frame
 
-        @@small_frame:
-                push ax
-                mov di, cx
-                shr cx, 1d                      ; cx >> 1
-                mov ax, 38d
-                sub ax, cx                      ; ax = 38 - cx
-                shl ax, 1d                      ; ax = ax * 2
-                add ax, ROW_OFFSET_F
-                
-                mov cx, di
-                add cx, 2d
-                mov di, ax
-                pop ax
-
-
-        @@print_frame:
                 PRINT_ONE_ROW
 
                 add si, 3d
@@ -460,9 +450,9 @@ LEN_STRING      equ $ - registers
 
 frame           db 0D5h, 0CDh, 0B8h, 0C6h, 02Eh, 0B5h, 0D4h, 0CDh, 0BEh
 
-save_buffer     db 160d * 6d dup (0)
+save_buffer     db BUFFERS_SIZE dup (0)
 
-draw_buffer     db 160d * 6d dup (0)
+draw_buffer     db BUFFERS_SIZE dup (0)
 
 end_my_interrupt:
 
