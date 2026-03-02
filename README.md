@@ -1,8 +1,10 @@
 #        Работа с видеопамятью
 
-[Печать рамки](##frame_res.asm) \
-[Работа с резидентами](##keyboard.asm)
+[Печать рамки](#frame_res) \
+[Работа с резидентами](#keyboard)
 
+
+<div id="frame_res"></div>
 
 ## frame_res.asm
 Если вы хотите напечатать свою строку в красивой рамке на экране, то это программа для вас!
@@ -76,7 +78,7 @@ frame_res.com 4F 74 03 0 +-+***+-+ Hello, friend!
 ```
 ![Пример 6](examples/6.png)
 
-
+<div id="keyboard"></div>
 
 ## keyboard.asm
 
