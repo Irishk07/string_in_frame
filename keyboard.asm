@@ -26,7 +26,7 @@ VIDEO_ADDRESS   equ 0b800h
 LEN_COMMAND_LINE        equ 80h
 FIRST_SYMB_COMMAND_LINE equ 82h
 
-APPEAR          equ 041h                ; F11
+APPEAR          equ 057h                ; F11
 DISAPPEAR       equ 058h                ; F12
 
 BUFFERS_SIZE    equ 160d * 6d
@@ -80,6 +80,31 @@ Start:
                 shr dx, 4
                 inc dx
                 int 21h
+
+
+
+;_______________________________________________________________________________________________________________;
+;;;;            Macro "CALL_PRINT_REGISTERS" call function Print_Registers and push all arguments            ;;;;
+;                                                                                                               ;
+;; Entry:                                                                                                      ;;
+;                                                                                                               ;
+;; Exit:                                                                                                       ;;
+;                                                                                                               ;
+;; Expected:                                                                                                   ;;
+;                                                                                                               ;
+;; Destroyed:                                                                                                  ;;
+;_______________________________________________________________________________________________________________;
+
+CALL_PRINT_REGISTERS    macro code
+
+                push si cx di dx ax bx VIDEO_ADDRESS cs
+                pop ds es
+                mov cx, 13d
+                mov dx, 6d                                      ; save 6 registers, need skip
+                call Print_registers
+                pop bx ax dx di cx si
+
+                        endm
 
 
 
@@ -190,8 +215,9 @@ My_interrupt_9           proc
 ;_______________________________________________________________________________________________________________;
 
 My_interrupt_8           proc
+
                 cmp cs:[press_flag], 1
-                jne @@finish_of_process
+                jne @@done
 
                 push sp ax bx cx dx si di bp ss ds es           ; save, because we change them                
         
@@ -218,37 +244,13 @@ My_interrupt_8           proc
                 pop es ds ss bp di si dx cx bx ax            
                 add sp, 2d                                      ; because need pop sp
 
-        @@finish_of_process:
+        @@done:
                 db  0eah                                        ; code of command jmp
                 Default_offset_8 dw 0
                 Default_segment_8 dw 0
 
                         endp
 
-
-
-;_______________________________________________________________________________________________________________;
-;;;;            Macro "CALL_PRINT_REGISTERS" call function Print_Registers and push all arguments            ;;;;
-;                                                                                                               ;
-;; Entry:                                                                                                      ;;
-;                                                                                                               ;
-;; Exit:                                                                                                       ;;
-;                                                                                                               ;
-;; Expected:                                                                                                   ;;
-;                                                                                                               ;
-;; Destroyed:                                                                                                  ;;
-;_______________________________________________________________________________________________________________;
-
-CALL_PRINT_REGISTERS    macro code
-
-                push si cx di dx ax bx VIDEO_ADDRESS cs
-                pop ds es
-                mov cx, 13d
-                mov dx, 6d                                      ; save 6 registers, need skip
-                call Print_registers
-                pop bx ax dx di cx si
-
-                        endm
 
 
 ;_______________________________________________________________________________________________________________;
@@ -414,9 +416,8 @@ Digit_to_char           proc
 ;; Destroyed:   SI, DI, AX, DX                                                                                 ;;
 ;_______________________________________________________________________________________________________________;
 
-                rep movsw                       ; repeat cx times: mov es:[di++], ds:[si++]
-
 Print_String            proc
+
                 push ax
                 mov ax, cx
                 mov ah, 0
@@ -492,6 +493,7 @@ Print_String            proc
 ;_______________________________________________________________________________________________________________;
 
 PRINT_ONE_ROW           macro code
+
                 mov al, ds:[si]
                 stosw                   ; mov es:[di++], ax
 
@@ -523,7 +525,7 @@ PRINT_ONE_ROW           macro code
 ;_______________________________________________________________________________________________________________;
 
 Print_Frame             proc
-                ; print frame in draw_buffer
+
                 mov cx, SYMBS_IN_ROW-2d
 
                 PRINT_ONE_ROW
