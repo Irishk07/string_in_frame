@@ -22,43 +22,57 @@ NUMBER_COLUMN_S equ 18d
 BYTES_OFFSET_F	equ ROW_OFFSET_F+BYTES_ON_SYMB*NUMBER_COLUMN_F
 BYTES_OFFSET_S	equ ROW_OFFSET_S+BYTES_ON_SYMB*NUMBER_COLUMN_S
 
-COLOR_S		equ 04Fh
-COLOR_F		equ 0Ch
+VIDEO_ADDRESS   equ 0b800h
+LEN_COMMAND_LINE        equ 80h
+FIRST_SYMB_COMMAND_LINE equ 82h
 
-APPEAR          equ 057h                ; F11
+APPEAR          equ 041h                ; F11
 DISAPPEAR       equ 058h                ; F12
 
 BUFFERS_SIZE    equ 160d * 6d
 
 
 Start:
-                ; save old function address
+
+                mov si, FIRST_SYMB_COMMAND_LINE
+                xor ax, ax
+                mov al, ds:[LEN_COMMAND_LINE]
+                mov bx, offset COLOR_S
+                mov cx, offset COLOR_F
+                mov dx, offset NUMBER_F
+                call Read_attributes
+                mov bx, offset ADDRESS_F
+                call Choose_frame
+
+                ; save old functions address
                 mov ax, 3509h
                 int 21h
                 mov Default_offset_9, bx
                 mov bx, es
                 mov Default_segment_9, bx
 
-                ;mov ax, 3508h
-                ;int 21h
-                ;mov Default_offset_8, bx
-                ;mov bx, es
-                ;mov Default_segment_8, bx
-;
+                mov ax, 3508h
+                int 21h
+                mov Default_offset_8, bx
+                mov bx, es
+                mov Default_segment_8, bx
+
 
                 push 0
                 pop es
                 mov bx, 4 * 09h                         ; offset of cell 09h in interrupt table
-
                 cli                                     ; clear interrupt flag
-
                 mov es:[bx], offset My_interrupt_9      ; offset of my func
                 mov ax, cs
                 mov es:[bx + 2], ax                     ; segment of my func
-
+                push 0
+                pop es
+                mov bx, 4 * 08h                         ; offset of cell 09h in interrupt table
+                mov es:[bx], offset My_interrupt_8      ; offset of my func
+                mov ax, cs
+                mov es:[bx + 2], ax                     ; segment of my func
                 sti                                     ; set interrupt flag
 
-                ;int 09h
 
                 ; this code need save in memory (in paragraph = 16 bytes):
                 mov ax, 3100h
@@ -68,6 +82,19 @@ Start:
                 int 21h
 
 
+
+;_______________________________________________________________________________________________________________;
+;                                              <STD call>                                                       ;
+;;;;            Function "My_interrupt_9" - system function, print registers to video_memory, when press F11 ;;;;
+;                                                                                                               ;
+;; Entry:                                                                                                      ;;
+;                                                                                                               ;
+;; Exit:                                                                                                       ;;
+;                                                                                                               ;
+;; Expected:                                                                                                   ;;
+;                                                                                                               ;
+;; Destroyed:                                                                                                  ;;
+;_______________________________________________________________________________________________________________;
 
 My_interrupt_9           proc
 
@@ -81,7 +108,9 @@ My_interrupt_9           proc
                 jne @@second_check
         
         @@save_screen:
-                push 0b800h cs
+                mov cs:[press_flag], 1
+
+                push VIDEO_ADDRESS cs
                 pop es ds
 
                 mov si, ROW_OFFSET_F                        
@@ -90,12 +119,7 @@ My_interrupt_9           proc
                 cld
                 rep movsw                                       ; repeat cx times: mov es:[di++], ds:[si++]
 
-                push si cx di dx ax bx 0b800h cs
-                pop ds es
-                mov cx, 13d
-                mov dx, 6d                                      ; save 5 registers, need skip
-                call Print_registers
-                pop bx ax dx di cx si
+                CALL_PRINT_REGISTERS
         
                 jmp @@finish_of_process
 
@@ -103,7 +127,9 @@ My_interrupt_9           proc
                 cmp al, DISAPPEAR                               
                 jne @@finish_of_process
 
-                push 0b800h cs
+                mov cs:[press_flag], 0
+
+                push VIDEO_ADDRESS cs
                 pop ds es
         
                 mov si, offset save_buffer                            
@@ -148,6 +174,81 @@ My_interrupt_9           proc
 
                         endp
 
+
+
+;_______________________________________________________________________________________________________________;
+;                                              <STD call>                                                       ;
+;;;;            Function "My_interrupt_8" - system function, updates registers                               ;;;;
+;                                                                                                               ;
+;; Entry:                                                                                                      ;;
+;                                                                                                               ;
+;; Exit:                                                                                                       ;;
+;                                                                                                               ;
+;; Expected:                                                                                                   ;;
+;                                                                                                               ;
+;; Destroyed:                                                                                                  ;;
+;_______________________________________________________________________________________________________________;
+
+My_interrupt_8           proc
+                cmp cs:[press_flag], 1
+                jne @@finish_of_process
+
+                push sp ax bx cx dx si di bp ss ds es           ; save, because we change them                
+        
+                mov cx, BUFFERS_SIZE - 2
+                push VIDEO_ADDRESS
+                pop es                                          ; es = 0b800h
+                mov di, ROW_OFFSET_F
+                mov si, offset draw_buffer
+                mov bx, offset save_buffer
+        @@compare_buf_vm:
+                mov ax, es:[di]
+                cmp ax, cs:[si]
+                je @@next_compare
+                mov cs:[si], ax
+                mov cs:[bx], ax
+        @@next_compare:
+                inc di
+                inc si
+                inc bx
+                loop @@compare_buf_vm
+
+                CALL_PRINT_REGISTERS              
+
+                pop es ds ss bp di si dx cx bx ax            
+                add sp, 2d                                      ; because need pop sp
+
+        @@finish_of_process:
+                db  0eah                                        ; code of command jmp
+                Default_offset_8 dw 0
+                Default_segment_8 dw 0
+
+                        endp
+
+
+
+;_______________________________________________________________________________________________________________;
+;;;;            Macro "CALL_PRINT_REGISTERS" call function Print_Registers and push all arguments            ;;;;
+;                                                                                                               ;
+;; Entry:                                                                                                      ;;
+;                                                                                                               ;
+;; Exit:                                                                                                       ;;
+;                                                                                                               ;
+;; Expected:                                                                                                   ;;
+;                                                                                                               ;
+;; Destroyed:                                                                                                  ;;
+;_______________________________________________________________________________________________________________;
+
+CALL_PRINT_REGISTERS    macro code
+
+                push si cx di dx ax bx VIDEO_ADDRESS cs
+                pop ds es
+                mov cx, 13d
+                mov dx, 6d                                      ; save 6 registers, need skip
+                call Print_registers
+                pop bx ax dx di cx si
+
+                        endm
 
 
 ;_______________________________________________________________________________________________________________;
@@ -204,7 +305,7 @@ Print_registers         proc
                 push cs
                 pop es                          ; es = cs
                 mov ah, COLOR_F
-                mov si, offset frame
+                mov si, cs:[ADDRESS_F]
                 mov di, offset draw_buffer
                 call Print_Frame
                 pop si bx dx cx ax di
@@ -444,20 +545,245 @@ Print_Frame             proc
 
 
 
+;_______________________________________________________________________________________________________________;
+;                                              <STD call>                                                       ;
+;;;;            Function "Read_attributes" reads first, second and third (if there is) attributes            ;;;;
+;                                                                                                               ;
+;; Entry:       SI - the position from which start to read                                                     ;;
+;               AL - len of command line                                                                        ;
+;               BX - address for first                                                                          ;
+;               CX - address for second                                                                         ;
+;               DX - address for third                                                                          ;
+;                                                                                                               ;
+;; Exit:        Values of attributes on addresses (or default if not)                                          ;;
+;                                                                                                               ;
+;; Expected:    DS = CS                                                                                        ;;
+;                                                                                                               ;
+;; Destroyed:   SI                                                                                             ;;
+;_______________________________________________________________________________________________________________;
+
+Read_attributes         proc
+
+                cmp al, 0
+                je @@done
+
+                dec ax
+        @@read_color_of_string:
+                push ax bx
+                call Atoi_byte                  ; ax = color of string
+                pop bx
+
+                cmp al, -1d
+                je @@done
+
+                add si, 2d
+                mov cs:[bx], al
+
+                pop ax
+                sub ax, 2d
+                cmp al, 0
+                je @@done
+        @@read_color_of_frame:          
+                push ax bx
+                call Atoi_byte
+                pop bx  
+
+                cmp al, -1d
+                je @@done
+
+                add si, 2d
+                mov bx, cx
+                mov cs:[bx], al
+
+                pop ax
+                sub ax, 2d
+                cmp al, 0
+                je @@done
+        @@read_number_of_frame:                  
+                mov al, ds:[si]
+                call Atoi_char
+
+                cmp al, -1d
+                je @@done
+
+                add si, 2d
+                mov bx, dx
+                mov cs:[bx], al
+
+        @@done:
+                ret
+
+                        endp
+
+
+
+;_______________________________________________________________________________________________________________;
+;                                              <STD call>                                                       ;
+;;;;            Function "Choose_frame" print addres of choosing frame                                       ;;;;
+;                                                                                                               ;
+;; Entry:       BX - addres for frame                                                                          ;;
+;                                                                                                               ;
+;; Exit:                                                                                                       ;;
+;                                                                                                               ;
+;; Expected:                                                                                                   ;;
+;                                                                                                               ;
+;; Destroyed:                                                                                                  ;;
+;_______________________________________________________________________________________________________________;
+
+Choose_frame             proc
+
+                cmp cs:[NUMBER_F], 0
+                je @@Choose_frame_user
+                cmp cs:[NUMBER_F], 3
+                ja @@done
+
+                mov ch, 0
+                mov cl, cs:[NUMBER_F]
+                dec cl
+                push ax
+                mov al, cl
+                shl cl, 3d
+                add cl, al                              ; (cl - 1) * 9
+                pop ax
+                add cx, offset frame_1
+                mov cs:[bx], cx
+                jmp @@done
+
+        @@Choose_frame_user:
+                mov cs:[bx], si
+
+        @@done:
+                ret
+
+                        endp
+
+
+
+;_______________________________________________________________________________________________________________;
+;                                              <STD call>                                                       ;
+;;;;            Function "Atoi_byte" converts two chars to a number                                          ;;;;
+;                                                                                                               ;
+;; Entry:       SI - the position of the chars                                                                 ;;
+;                                                                                                               ;
+;; Exit:        AL - number (if OK), in error Al = -1                                                          ;; TODO podumat'
+;                                                                                                               ;
+;; Expected:    DS = CS                                                                                        ;;
+;                                                                                                               ;
+;; Destroyed:   BX, SI                                                                                         ;;
+;_______________________________________________________________________________________________________________;
+
+Atoi_byte               proc
+                mov al, ds:[si]
+
+                call Atoi_char
+                cmp al, -1
+                je @@error
+
+                mov bl, al
+                shl bl, 4               ; bl = al *16
+
+                inc si
+                mov al, ds:[si]
+
+                call Atoi_char
+                cmp al, -1
+                je @@error
+
+                add al, bl              ; al = bl + al (first * 16) + second
+                ret
+
+        @@error:
+                mov al, -1
+                ret
+
+                        endp
+
+
+
+;_______________________________________________________________________________________________________________;
+;                                              <STD call>                                                       ;
+;;;;            Function "Atoi_char" converts symbol to a number  (hex)                                ;;;;
+;                                                                                                               ;
+;; Entry:       AL - symbol                                                                                    ;;
+;                                                                                                               ;
+;; Exit:        AL - number (if OK), in error Al = -1                                                          ;;
+;                                                                                                               ;
+;; Expected:                                                                                                   ;;
+;                                                                                                               ;
+;; Destroyed:                                                                                                  ;;
+;_______________________________________________________________________________________________________________;
+
+Atoi_char                proc
+
+        @@check_number:
+                cmp al, '0'
+                jb @@check_upper_alpha
+                cmp al, '9'
+                ja @@check_upper_alpha
+
+                sub al, '0'
+                ret
+
+        @@check_upper_alpha:
+                cmp al, 'A'
+                jb @@check_lower_alpha
+                cmp al, 'F'
+                ja @@check_lower_alpha
+
+                sub al, 'A'
+                add al, 10d
+                ret
+
+        @@check_lower_alpha:
+                cmp al, 'a'
+                jb @@error
+                cmp al, 'f'
+                ja @@error
+
+                sub al, 'a'
+                add al, 10d
+                ret
+
+        @@error:
+                mov al, -1d
+                ret
+
+                        endp
+
+
+
+COLOR_S		db 04Fh
+
+COLOR_F		db 0Ch
+
+NUMBER_F        db 1
+
+ADDRESS_F       dw offset frame_1
+
+frame_1         db 0D5h, 0CDh, 0B8h, 0C6h, 02Eh, 0B5h, 0D4h, 0CDh, 0BEh
+
+frame_2         db 0DAh, 0C4h, 0BFh, 0B3h, 02Eh, 0B3h, 0C0h, 0C4h, 0D9h
+
+frame_3         db 003h, 003h, 003h, 004h, 003h, 004h, 003h, 003h, 003h
+
 registers       db 'cs = 0000, ip = 0000, sp = 0000, ax = 0000, bx = 0000, cx = 0000, dx = 0000, si = 0000, di = 0000, bp = 0000, ss = 0000, ds = 0000, es = 0000', 0Dh
 
 LEN_STRING      equ $ - registers
-
-frame           db 0D5h, 0CDh, 0B8h, 0C6h, 02Eh, 0B5h, 0D4h, 0CDh, 0BEh
 
 save_buffer     db BUFFERS_SIZE dup (0)
 
 draw_buffer     db BUFFERS_SIZE dup (0)
 
+press_flag      db 0
+
 end_my_interrupt:
 
 
 end Start
+
+
+
+
 
 ;_______________________________________________________
 ; Start:  
