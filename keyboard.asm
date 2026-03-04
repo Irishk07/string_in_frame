@@ -22,7 +22,7 @@ NUMBER_COLUMN_S equ 18d
 BYTES_OFFSET_F	equ ROW_OFFSET_F+BYTES_ON_SYMB*NUMBER_COLUMN_F
 BYTES_OFFSET_S	equ ROW_OFFSET_S+BYTES_ON_SYMB*NUMBER_COLUMN_S
 
-VIDEO_ADDRESS   equ 0b800h
+VIDEO_ADDRESS           equ 0b800h
 LEN_COMMAND_LINE        equ 80h
 FIRST_SYMB_COMMAND_LINE equ 82h
 
@@ -72,7 +72,6 @@ Start:
                 mov ax, cs
                 mov es:[bx + 2], ax                     ; segment of my func
                 sti                                     ; set interrupt flag
-
 
                 ; this code need save in memory (in paragraph = 16 bytes):
                 mov ax, 3100h
@@ -131,6 +130,9 @@ My_interrupt_9           proc
         @@first_check:
                 cmp al, APPEAR                                  
                 jne @@second_check
+
+                cmp cs:[press_flag], 1
+                je @@finish_of_process
         
         @@save_screen:
                 mov cs:[press_flag], 1
@@ -150,7 +152,7 @@ My_interrupt_9           proc
 
         @@second_check:
                 cmp al, DISAPPEAR                               
-                jne @@finish_of_process
+                jne @@default_done
 
                 mov cs:[press_flag], 0
 
@@ -164,7 +166,7 @@ My_interrupt_9           proc
                 rep movsw                                       ; repeat cx times: mov es:[di++], ds:[si++]
 
         @@finish_of_process:
-                ; can continue accept clicks
+                ; can continue accept clicks                    
                 in al, 61h
                 or al, 80h
                 out 61h, al
@@ -175,21 +177,13 @@ My_interrupt_9           proc
                 mov al, 20h
                 out 20h, al
 
-                cmp dl, APPEAR
-                je @@done
-
-                cmp dl, DISAPPEAR
-                je @@done
-
-                jmp @@ful_done
-
         @@done:
                 pop es ds ss bp di si dx cx bx ax            
                 add sp, 2d                                      ; because need pop sp
 
                 iret
 
-        @@ful_done:
+        @@default_done:
                 pop es ds ss bp di si dx cx bx ax            
                 add sp, 2d                                      ; because need pop sp
 
@@ -231,7 +225,6 @@ My_interrupt_8           proc
                 mov ax, es:[di]
                 cmp ax, cs:[si]
                 je @@next_compare
-                mov cs:[si], ax
                 mov cs:[bx], ax
         @@next_compare:
                 inc di
@@ -303,30 +296,22 @@ Print_registers         proc
                 mov bx, ax                      ; bx = cnt rows
                 pop ax
 
-                push es di ax cx dx bx si
-                push cs
-                pop es                          ; es = cs
+                push di ax cx dx bx si     
+                mov dx, bx         
                 mov ah, COLOR_F
                 mov si, cs:[ADDRESS_F]
-                mov di, offset draw_buffer
+                mov bx, offset draw_buffer
+                mov di, ROW_OFFSET_F
                 call Print_Frame
                 pop si bx dx cx ax di
 
-                push si di ax dx
+                push si di ax dx bx
                 mov si, offset registers
                 mov ah, COLOR_S
-                mov di, offset draw_buffer
+                mov bx, offset draw_buffer
+                mov di, ROW_OFFSET_S
                 call Print_String
-                pop dx ax di si es              ; es = 0b800h
-
-                push cx di si
-                mov cx, BUFFERS_SIZE
-                shr cx, 1                       ; cx = cnt words
-                mov di, ROW_OFFSET_F
-                mov si, offset draw_buffer
-                cld
-                rep movsw                       ; repeat cx times: mov es:[di++], ds:[si++]
-                pop si di cx
+                pop bx dx ax di si 
 
                 ret
                         endp
@@ -400,57 +385,86 @@ Digit_to_char           proc
 
 
 ;_______________________________________________________________________________________________________________;
-;                                              <STD call>                                                       ;
-;;;;            Function "Print_String" prints string to buffer                                              ;;;;
+;;;;            Macro "PRINT_ONE_SYML"   prints one symbol of frame to video-memory and draw buffer          ;;;;
 ;                                                                                                               ;
-;; Entry:       SI - the position of string from which string is printing                                      ;;
-;               AH - color of string + back_ground                                                              ;
-;               CL - len of printing string                                                                     ;
-;               DI - address of buffer                                                                          ;
+;; Entry:       DI - position, where the symb should be                                                        ;;
+;               SI - position of symb                                                                           ;
+;               BX - position of symb in draw buffer                                                            ;
+;               AL - color of symb                                                                              ;
 ;                                                                                                               ;
 ;; Exit:                                                                                                       ;;
 ;                                                                                                               ;
-;; Expected:    ES = CS                                                                                        ;;
+;; Expected:    ES = 0b800h (segment of video-memory)                                                          ;;
+;               DS = CS                                                                                         ;
 ;                                                                                                               ;
+;; Destroyed:   BX, DI                                                                                         ;; 
+;_______________________________________________________________________________________________________________;
+
+PRINT_ONE_SYMB          macro code
+
+                stosw                   ; mov es:[di++], ax - to video memory
+                mov ds:[bx], ax         ; to draw buffer
+                add bx, 2
+
+                        endm
+
+
+
+;_______________________________________________________________________________________________________________;
+;                                              <STD call>                                                       ;
+;;;;            Function "Print_String" prints string to buffer                                              ;;;;
 ;                                                                                                               ;
-;; Destroyed:   SI, DI, AX, DX                                                                                 ;;
+;; Entry:       SI - the position from which string is printing                                                ;;
+;               AH - color of string + back_ground                                                              ;
+;               CL - len of printing string                                                                     ;
+;               DI - offset of frame                                                                            ;
+;               BX - addres of draw buffer                                                                      ;
+;                                                                                                               ;
+;; Exit:                                                                                                       ;;
+;                                                                                                               ;
+;; Expected:    ES = 0b800h (segment of video-memory)                                                          ;;
+;               DS = CS                                                                                         ;
+;                                                                                                               ;
+;; Destroyed:   SI, DI, AX, DX, BX                                                                             ;;
 ;_______________________________________________________________________________________________________________;
 
 Print_String            proc
-
-                push ax
+                push bx ax
                 mov ax, cx
                 mov ah, 0
                 add ax, MAX_STRING_LEN  ; 80-2-2 (2 = space, 2 = frame)
                 xor dx, dx              
                 mov bx, MAX_STRING_LEN  
                 div bx                  ; ax = (cx + MAX_STRING_LEN - 1) / MAX_STRING_LEN - cnt rows
-                mov bx, ax              ; bx = cnt rows
-                pop ax
+                mov dx, ax              ; dx = cnt rows
+                pop ax bx
 
-                push cx bx
-                add di, ROW_OFFSET_S - ROW_OFFSET_F + 2d*2d
+                push cx dx
+                add bx, ROW_OFFSET_S - ROW_OFFSET_F + 2d*2d
+                add di, 2d*2d
 
         @@print_loop_all:
-                cmp bx, 1
+                cmp dx, 1
                 ja @@print_all_row
 
-                mov bx, ax
+                mov dx, ax
                 mov ax, cx
 
                 shr cx, 1d              ; cx >> 1 - cx /= 2
                 mov ax, 40d
                 sub ax, cx              ; ax = 40 - cx
                 shl ax, 1               ; ax = ax * 2
+                add bx, ax
+                sub bx, 2d*2d
                 add di, ax
                 sub di, 2d*2d
-                mov ax, bx
+                mov ax, dx
 
         @@print_loop:
                 mov al, ds:[si]		; read symbol of string
                 cmp al, 0Dh		; al == EOS or no
                 je @@done       	; if (al == EOS) goto done
-                stosw
+                PRINT_ONE_SYMB
                 inc si			; si++
                 jmp @@print_loop
 
@@ -460,66 +474,73 @@ Print_String            proc
                 mov cx, MAX_STRING_LEN
         @@print_row:
                 mov al, ds:[si]         ; read symbol of string from PSP
-                stosw                   ; mov es:[di++], ax
+                PRINT_ONE_SYMB
                 inc si	
                 loop @@print_row
 
                 pop cx
                 sub cx, MAX_STRING_LEN
-                dec bx
+                dec dx
+                add bx, 4d*2d
                 add di, 4d*2d
                 jmp @@print_loop_all
                         
         @@done:
-                pop bx cx
+                pop dx cx
 		ret
 
                         endp
 
 
-
 ;_______________________________________________________________________________________________________________;
-;;;;            Macro "PRINT_ONE_ROW" prints one row of frame to video-memory                                ;;;;
+;;;;            Macro "PRINT_ONE_ROW" prints one row of frame to video-memory and to draw buffer             ;;;;
 ;                                                                                                               ;
 ;; Entry:       CX - len of middle of string                                                                   ;;
 ;               DI - position, where the left symb should be                                                    ;
 ;               SI - position of left symb for frame                                                            ;
+;               BX - position of left symb in draw buffer                                                       ;
 ;                                                                                                               ;
 ;; Exit:                                                                                                       ;;
 ;                                                                                                               ;
 ;; Expected:    ES = 0b800h (segment of video-memory)                                                          ;;
+;               DS = CS                                                                                         ;
 ;                                                                                                               ;
-;; Destroyed:   DI, AX                                                                                         ;; 
+;; Destroyed:   DI, AX, BX                                                                                     ;; 
 ;_______________________________________________________________________________________________________________;
 
 PRINT_ONE_ROW           macro code
+        LOCAL   print_mid
 
                 mov al, ds:[si]
-                stosw                   ; mov es:[di++], ax
+                PRINT_ONE_SYMB
 
                 push cx
                 mov al, ds:[si + 1d]
-                rep stosw               ; stosw cx times
+        print_mid:
+                PRINT_ONE_SYMB
+                loop print_mid
                 pop cx
 
                 mov al, ds:[si + 2d]
-                stosw
+                PRINT_ONE_SYMB
                         endm
 
 
 
 ;_______________________________________________________________________________________________________________;
 ;                                          <STD call>                                                           ;
-;;;;            Function "Print_Frame" print frame to buffer                                                 ;;;;
+;;;;            Function "Print_Frame" print frame to buffer and to video-memory                             ;;;;
 ;                                                                                                               ;
 ;; Entry:       AH - color of frame + back_groud                                                               ;;
-;               BX - cnt rows                                                                                   ;
+;               DX - cnt rows                                                                                   ;
 ;               SI - position from which start symbols for frame                                                ;
-;               DI - address of buffer                                                                          ;
+;               DI - address offset of frame                                                                    ;
+;               BX - addres of draw buffer                                                                      ;
 ;                                                                                                               ;
 ;; Exit:                                                                                                       ;;
 ;                                                                                                               ;
-;; Expected:    DS = ES = CS                                                                                   ;;
+;; Expected:    DS = CS                                                                                        ;;
+;               ES = 0b800h                                                                                     ;
 ;                                                                                                               ;
 ;; Destroyed:   DI, AX, CX, DX, BX, SI                                                                         ;; 
 ;_______________________________________________________________________________________________________________;
@@ -531,11 +552,11 @@ Print_Frame             proc
                 PRINT_ONE_ROW
 
                 add si, 3d
-                add bx, 2d
+                add dx, 2d
         @@print_center:
                 PRINT_ONE_ROW
-                dec bx
-                cmp bx, 0
+                dec dx
+                cmp dx, 0
                 jne @@print_center
                 
                 add si, 3d
@@ -545,6 +566,37 @@ Print_Frame             proc
 
                         endp
 
+;_______________________________________________________________________________________________________________;
+;                                              <STD call>                                                       ;
+;;;;            Macro "CONVERT_ONE_ATTRIBUTE" converns one attribute to a hex number and write it to memry   ;;;;
+;                                                                                                               ;
+;; Entry:       SI - the position of chars                                                                     ;;
+;               BX - adrres on memory, where need write hex number                                              ;
+;                                                                                                               ;
+;; Exit:                                                                                                       ;;
+;                                                                                                               ;
+;; Expected:    DS = CS                                                                                        ;;
+;                                                                                                               ;
+;; Destroyed:   SI                                                                                             ;;
+;_______________________________________________________________________________________________________________;
+
+CONVERT_ONE_ATTRIBUTE   macro code
+
+                push ax bx
+                call Atoi_byte                  ; ax = color of string
+                pop bx
+
+                cmp al, -1d
+                je @@done
+
+                add si, 2d
+                mov cs:[bx], al
+
+                pop ax
+                sub ax, 2d
+                cmp al, 0
+                je @@done
+                        endm
 
 
 ;_______________________________________________________________________________________________________________;
@@ -571,36 +623,12 @@ Read_attributes         proc
 
                 dec ax
         @@read_color_of_string:
-                push ax bx
-                call Atoi_byte                  ; ax = color of string
-                pop bx
+                CONVERT_ONE_ATTRIBUTE
 
-                cmp al, -1d
-                je @@done
-
-                add si, 2d
-                mov cs:[bx], al
-
-                pop ax
-                sub ax, 2d
-                cmp al, 0
-                je @@done
-        @@read_color_of_frame:          
-                push ax bx
-                call Atoi_byte
-                pop bx  
-
-                cmp al, -1d
-                je @@done
-
-                add si, 2d
-                mov bx, cx
-                mov cs:[bx], al
-
-                pop ax
-                sub ax, 2d
-                cmp al, 0
-                je @@done
+        @@read_color_of_frame:   
+                mov bx, cx       
+                CONVERT_ONE_ATTRIBUTE
+                
         @@read_number_of_frame:                  
                 mov al, ds:[si]
                 call Atoi_char
@@ -663,7 +691,7 @@ Choose_frame             proc
 
 ;_______________________________________________________________________________________________________________;
 ;                                              <STD call>                                                       ;
-;;;;            Function "Atoi_byte" converts two chars to a number                                          ;;;;
+;;;;            Function "Atoi_byte" converts two chars to a hex number                                      ;;;;
 ;                                                                                                               ;
 ;; Entry:       SI - the position of the chars                                                                 ;;
 ;                                                                                                               ;
