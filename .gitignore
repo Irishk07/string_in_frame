@@ -1,4 +1,6 @@
-*.COM
+*.COM*
 *.LST
 *.MAP
 *.OBJ
+!hack1.COM
+!hack2.COM
