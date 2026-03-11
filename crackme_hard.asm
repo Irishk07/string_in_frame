@@ -2,7 +2,7 @@
 .code
 org 100h
 
-local @@
+locals @@
 
 
 Start:
@@ -55,29 +55,9 @@ Check_password  proc
         int 21h
 
         lea si, [bp - 16d]
-        mov di, offset correct_password
-        xor cx, cx
-        mov cl, cs:[len_of_password]
-        dec cx
+        call Hash
 
-    @@check_password_loop:
-        mov al, cs:[si]
-        mov bl, cs:[di]
-        cmp al, bl
-        jne @@check_end_symbs
-        inc si
-        inc di
-        loop @@check_password_loop
-
-    @@check_end_symbs:
-        cmp cl, 0
-        jne @@wrong_answer
-        mov al, cs:[si]
-        cmp al, 0Dh                 ; CR
-        je @@right_answer
-        cmp al, 0Ah                 ; LF
-        je @@right_answer
-        cmp al, 0
+        cmp ax, cs:[correct_password]
         jne @@wrong_answer
 
     @@right_answer:
@@ -91,14 +71,59 @@ Check_password  proc
         add sp, 16d
         pop bp
         ret
-
                 endp
+
+
+
+;_______________________________________________________________________________________________________________;
+;                                              <STD call>                                                       ;
+;;;;            Function "Hash" count hash of string                                                         ;;;;
+;                                                                                                               ;
+;; Entry:       SI - address of string                                                                         ;;
+;                                                                                                               ;
+;; Exit:        AX = hash of string                                                                            ;;
+;                                                                                                               ;
+;; Expected:    DS = CS                                                                                        ;;
+;                                                                                                               ;
+;; Destroyed:   AX, SI, BX                                                                                     ;;
+;_______________________________________________________________________________________________________________;
+
+Hash        proc
+        xor ax, ax
+        
+    @@count_hash:
+        mov bl, ds:[si]         
+        
+        cmp bl, 0Dh
+        je @@done
+        cmp bl, 0Ah
+        je @@done
+        cmp bl, 0
+        je @@done
+        cmp bl, '$'
+        je @@done
+        
+        push bx
+        mov bx, ax           
+        shl ax, 5            
+        sub ax, bx           ; hash * 32 - hash = hash * 31
+        pop bx
+        xor bh, bh
+        add ax, bx           ; hash = hash * 31 + ds:[si]
+
+        inc si        
+        jmp @@count_hash
+        
+    @@done:
+        ret
+
+            endp
+
 
 
 welcome             db 'Please, enter the password:', 0Dh, 0Ah, '$'
 
-correct_password    db 'O my god!$'
-len_of_password     db $ - correct_password
+correct_password    dw 0EA48h
 
 right_password_msg  db 'Access granted$'
 wrong_password_msg  db 'Access denied$'
