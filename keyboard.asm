@@ -122,7 +122,7 @@ CALL_PRINT_REGISTERS    macro code
 
 My_interrupt_9           proc
 
-                push sp ax bx cx dx si di bp ss ds es           ; save, because we change them                
+                push sp ss es ds bp di si dx cx bx ax           ; save, because we change them                
 
                 in al, 60h
                 mov dl, al
@@ -154,6 +154,9 @@ My_interrupt_9           proc
                 cmp al, DISAPPEAR                               
                 jne @@default_done
 
+                cmp cs:[press_flag], 1
+                jne @@finish_of_process
+
                 mov cs:[press_flag], 0
 
                 push VIDEO_ADDRESS cs
@@ -178,13 +181,13 @@ My_interrupt_9           proc
                 out 20h, al
 
         @@done:
-                pop es ds ss bp di si dx cx bx ax            
+                pop ax bx cx dx si di bp ds es ss            
                 add sp, 2d                                      ; because need pop sp
 
                 iret
 
         @@default_done:
-                pop es ds ss bp di si dx cx bx ax            
+                pop ax bx cx dx si di bp ds es ss           
                 add sp, 2d                                      ; because need pop sp
 
                 db  0eah                                        ; code of command jmp
@@ -213,7 +216,7 @@ My_interrupt_8           proc
                 cmp cs:[press_flag], 1
                 jne @@done
 
-                push sp ax bx cx dx si di bp ss ds es           ; save, because we change them                
+                push sp ss es ds bp di si dx cx bx ax            ; save, because we change them                
         
                 mov cx, BUFFERS_SIZE - 2
                 push VIDEO_ADDRESS
@@ -234,7 +237,7 @@ My_interrupt_8           proc
 
                 CALL_PRINT_REGISTERS              
 
-                pop es ds ss bp di si dx cx bx ax            
+                pop ax bx cx dx si di bp ds es ss            
                 add sp, 2d                                      ; because need pop sp
 
         @@done:
@@ -265,9 +268,12 @@ Print_registers         proc
                 push bp
                 mov bp, sp
                 mov bx, offset registers + 5d
+                add dx, 1d                      ; because in loop I push si
                 shl dx, 1
-        @@print_loop:
                 mov si, cx
+        @@print_loop:
+                push si
+                sub si, cx
                 shl si, 1
                 add si, 2d                      ; top of stack is return addres
                 add si, dx                      ; skip words in stack (maybe it is saved registers)
@@ -279,6 +285,7 @@ Print_registers         proc
                 pop dx bx cx
 
                 add bx, 11d
+                pop si
                 loop @@print_loop
                 pop bp
 
@@ -317,6 +324,44 @@ Print_registers         proc
                         endp
 
 
+
+;HexDigits   db  '0123456789ABCDEF'
+
+;_______________________________________________________________________________________________________________;
+;                                              <STD call>                                                       ;
+;;;;            Macro "DIGIT_TO_CHAR" converts one hex digit to a char                                       ;;;;
+;                                                                                                               ;
+;; Entry:       DL - hex digit                                                                                 ;;
+;                                                                                                               ;
+;; Exit:        AL - ASCII code                                                                                ;;
+;                                                                                                               ;
+;; Expected:                                                                                                   ;;
+;                                                                                                               ;
+;; Destroyed:                                                                                                  ;;
+;_______________________________________________________________________________________________________________;
+
+DIGIT_TO_CHAR           macro code
+                cmp dl, 9d
+                ja @@alpha
+                add dl, '0'
+                jmp @@done
+
+        @@alpha:
+                add dl, 'A' - 10d
+
+        @@done:
+                mov al, dl
+                        endm
+
+
+        ;mov dl, bh          ; берем старший байт
+        ;shr dl, 4d
+        ;push bx
+        ;mov bl, dl
+        ;mov dl, [HexDigits + bx]  ; берем символ из массива
+        ;pop bx
+        ;shl bx, 4d
+
 ;_______________________________________________________________________________________________________________;
 ;                                              <STD call>                                                       ;
 ;;;;            Function "Itoa_hex" converts hex number (2 bytes) to chars                                   ;;;;
@@ -340,7 +385,7 @@ Itoa_hex                proc
         @@print_one_digit:
                 mov dx, bx
                 and dx, 000Fh           ; last digit
-                call Digit_to_char
+                DIGIT_TO_CHAR
                 mov ds:[di], al
                 dec di
                 shr bx, 4d 
@@ -349,39 +394,6 @@ Itoa_hex                proc
                 ret
 
                         endp
-
-
-
-;_______________________________________________________________________________________________________________;
-;                                              <STD call>                                                       ;
-;;;;            Function "Digit_to_char" converts one hex digit to a char                                    ;;;;
-;                                                                                                               ;
-;; Entry:       DL - hex digit                                                                                 ;;
-;                                                                                                               ;
-;; Exit:        AL - ASCII code                                                                                ;;
-;                                                                                                               ;
-;; Expected:                                                                                                   ;;
-;                                                                                                               ;
-;; Destroyed:                                                                                                  ;;
-;_______________________________________________________________________________________________________________;
-
-
-Digit_to_char           proc
-
-                cmp dl, 9d
-                ja @@alpha
-                add dl, '0'
-                jmp @@done
-
-        @@alpha:
-                add dl, 'A' - 10d
-
-        @@done:
-                mov al, dl
-                ret
-
-                        endp
-
 
 
 ;_______________________________________________________________________________________________________________;
@@ -565,6 +577,34 @@ Print_Frame             proc
                 ret
 
                         endp
+
+
+COLOR_S		db 04Fh
+
+COLOR_F		db 0Ch
+
+NUMBER_F        db 1
+
+ADDRESS_F       dw offset frame_1
+
+frame_1         db 0D5h, 0CDh, 0B8h, 0C6h, 02Eh, 0B5h, 0D4h, 0CDh, 0BEh
+
+frame_2         db 0DAh, 0C4h, 0BFh, 0B3h, 02Eh, 0B3h, 0C0h, 0C4h, 0D9h
+
+frame_3         db 003h, 003h, 003h, 004h, 003h, 004h, 003h, 003h, 003h
+
+registers       db 'ax = 0000, bx = 0000, cx = 0000, dx = 0000, si = 0000, di = 0000, bp = 0000, ds = 0000, es = 0000, ss = 0000, sp = 0000, ip = 0000, cs = 0000', 0Dh
+
+LEN_STRING      equ $ - registers
+
+save_buffer     db BUFFERS_SIZE dup (0)
+
+draw_buffer     db BUFFERS_SIZE dup (0)
+
+press_flag      db 0
+
+end_my_interrupt:
+
 
 ;_______________________________________________________________________________________________________________;
 ;                                              <STD call>                                                       ;
@@ -779,34 +819,6 @@ Atoi_char                proc
                 ret
 
                         endp
-
-
-
-COLOR_S		db 04Fh
-
-COLOR_F		db 0Ch
-
-NUMBER_F        db 1
-
-ADDRESS_F       dw offset frame_1
-
-frame_1         db 0D5h, 0CDh, 0B8h, 0C6h, 02Eh, 0B5h, 0D4h, 0CDh, 0BEh
-
-frame_2         db 0DAh, 0C4h, 0BFh, 0B3h, 02Eh, 0B3h, 0C0h, 0C4h, 0D9h
-
-frame_3         db 003h, 003h, 003h, 004h, 003h, 004h, 003h, 003h, 003h
-
-registers       db 'cs = 0000, ip = 0000, sp = 0000, ax = 0000, bx = 0000, cx = 0000, dx = 0000, si = 0000, di = 0000, bp = 0000, ss = 0000, ds = 0000, es = 0000', 0Dh
-
-LEN_STRING      equ $ - registers
-
-save_buffer     db BUFFERS_SIZE dup (0)
-
-draw_buffer     db BUFFERS_SIZE dup (0)
-
-press_flag      db 0
-
-end_my_interrupt:
 
 
 end Start
