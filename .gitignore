@@ -5,3 +5,5 @@
 !hack1.COM
 !hack2.COM
 *.txt
+build/
+*_prog
