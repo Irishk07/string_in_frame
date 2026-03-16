@@ -2,13 +2,29 @@
 #include <SFML/Graphics.hpp>
 #include <SFML/Audio.hpp>
 #include <stdio.h>
+#include <stdint.h>
 
 #include "patcher.h"
+
 
 
 Status Patch(const char* filename, One_patch* all_patches, int patch_count) {
     assert(filename);
     assert(all_patches);
+
+    long correct_size = GetFileSize(CORRECT_FILE);
+    long cur_size     = GetFileSize(filename);
+
+    if (correct_size != cur_size)
+        return WRONG_FILE;
+
+    unsigned long correct_hash = Hash(CORRECT_FILE);
+    unsigned long cur_hash     = Hash(filename);
+
+    fprintf(stderr, "%lu %lu\n", correct_hash, cur_hash);
+
+    if (correct_hash != cur_hash)
+        return WRONG_FILE;
 
     FILE* file = fopen(filename, "rb+");
     if (file == NULL) 
@@ -27,7 +43,53 @@ Status Patch(const char* filename, One_patch* all_patches, int patch_count) {
     return SUCCES;
 }
 
-int main() {
+
+long GetFileSize(const char* filename) {
+    assert(filename);
+
+    FILE* file = fopen(filename, "rb");
+    if (file == NULL) 
+        return -1;
+    
+    fseek(file, 0, SEEK_END);        
+    long size = ftell(file);          
+
+    if (fclose(file) == EOF) {
+        perror("Error is: can't close file");
+        return -1;
+    }
+    
+    return size;
+}
+
+
+unsigned long Hash(const char* filename) {
+    assert(filename);
+
+    FILE* file = fopen(filename, "rb");
+    if (file == NULL) 
+        return 0;
+    
+    unsigned long hash = 5381;
+    int byte = 0;
+    
+    while ((byte = fgetc(file)) != EOF)
+        hash = ((hash << 5) + hash) ^ byte; 
+    
+    if (fclose(file) == EOF) {
+        perror("Error is: can't close file");
+        return 0;
+    }
+
+    return hash;
+}
+
+
+int main(int argc, char** argv) {
+    const char* patch_file = PATCH_FILE;
+    if (argc > 1)
+        patch_file = argv[1];
+
     
     One_patch all_patches[] = {
         {0x07, 0xE9},       // change call to jmp
@@ -75,7 +137,7 @@ int main() {
                     window.close();
 
                 if (event.key.code == sf::Keyboard::Enter) {
-                    if (Patch("p_hack2.com", all_patches, patch_count) == SUCCES) {
+                    if (Patch(patch_file, all_patches, patch_count) == SUCCES) {
                         printf("File patched successfully!\n");
                         text.setString("DONEEEEE!\nPress Esc to Exit");
                         text.setFillColor(sf::Color::Green);
