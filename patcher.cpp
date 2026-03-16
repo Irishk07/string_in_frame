@@ -18,10 +18,12 @@ Status Patch(const char* filename, One_patch* all_patches, int patch_count) {
     if (correct_size != cur_size)
         return WRONG_FILE;
 
-    unsigned long correct_hash = Hash(CORRECT_FILE);
-    unsigned long cur_hash     = Hash(filename);
+    unsigned long correct_hash       = Hash(CORRECT_FILE);
+    unsigned long correct_patch_hash = Hash(CORRECT_PATCH_FILE);
+    unsigned long cur_hash           = Hash(filename);
 
-    fprintf(stderr, "%lu %lu\n", correct_hash, cur_hash);
+    if (correct_patch_hash == cur_hash) 
+        return ALREADY_PATCHED;
 
     if (correct_hash != cur_hash)
         return WRONG_FILE;
@@ -137,16 +139,22 @@ int main(int argc, char** argv) {
                     window.close();
 
                 if (event.key.code == sf::Keyboard::Enter) {
-                    if (Patch(patch_file, all_patches, patch_count) == SUCCES) {
+                    Status status = Patch(patch_file, all_patches, patch_count);
+                    if (status == SUCCES) {
                         printf("File patched successfully!\n");
                         text.setString("DONEEEEE!\nPress Esc to Exit");
                         text.setFillColor(sf::Color::Green);
 
                         background.setTexture(texWin);
-                    }    
+                    }   
+                    else if (status == ALREADY_PATCHED) {
+                        printf("File is already patched\n");
+                        text.setString("File is already patched\nPress Esc to Exit");
+                        text.setFillColor(sf::Color::Cyan);
+                    } 
                     else {
                         printf("Error: patch failed\n");
-                        text.setString("Patch failed... Press esc and try again");
+                        text.setString("Patch failed...\nPress Esc and try again");
                         text.setFillColor(sf::Color::Red);
                     }    
                 }

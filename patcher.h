@@ -2,8 +2,9 @@
 #define PATCHER_H_
 
 
-const char* CORRECT_FILE = "hack2.COM";
-const char* PATCH_FILE   = "p_hack2.com";
+const char* CORRECT_FILE        = "hack2.COM";
+const char* CORRECT_PATCH_FILE  = "p_hack2.com";
+const char* PATCH_FILE          = "patch.com";
 
 
 struct One_patch {
@@ -12,10 +13,11 @@ struct One_patch {
 };
 
 enum Status {
-    SUCCES      = 0,
-    OPEN_ERROR  = 1,
-    CLOSE_ERROR = 2,
-    WRONG_FILE  = 3
+    SUCCES          = 0,
+    OPEN_ERROR      = 1,
+    CLOSE_ERROR     = 2,
+    WRONG_FILE      = 3,
+    ALREADY_PATCHED = 4
 };
 
 
